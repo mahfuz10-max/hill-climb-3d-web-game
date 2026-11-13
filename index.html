@@ -1,0 +1,3148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Hill Climb X6: 3D Sportback Racing</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #090d16;
+      color: #fff;
+    }
+    #game-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    /* Background Canvas (2D Parallax & Sky) */
+    #bg-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      pointer-events: none;
+    }
+    /* Three.js 3D Canvas */
+    #three-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+      pointer-events: none;
+    }
+    /* Foreground 2D Overlay Canvas (Road Cross-Section, Distance Markers, Particles, Analog Dials) */
+    #hud-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 3;
+      pointer-events: none;
+    }
+    /* UI Layer */
+    #ui-layer {
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      pointer-events: none;
+    }
+    .interactive {
+      pointer-events: auto;
+    }
+    /* Pedal Styling */
+    .pedal-btn {
+      transition: transform 0.06s cubic-bezier(0.2, 0.8, 0.2, 1), filter 0.06s ease;
+      transform-origin: bottom center;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.65), inset 0 2px 4px rgba(255, 255, 255, 0.25);
+    }
+    .pedal-btn.pressed {
+      transform: perspective(300px) rotateX(22deg) scaleY(0.9) translateY(6px);
+      filter: brightness(1.18);
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.3);
+    }
+    @keyframes pulseLowFuel {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.45; transform: scale(1.08); }
+    }
+    .low-fuel-flash {
+      animation: pulseLowFuel 0.55s infinite ease-in-out;
+    }
+    @keyframes floatUpFade {
+      0% { opacity: 0; transform: translateY(12px) scale(0.85); }
+      18% { opacity: 1; transform: translateY(0px) scale(1.05); }
+      80% { opacity: 1; transform: translateY(-22px) scale(1); }
+      100% { opacity: 0; transform: translateY(-38px) scale(0.92); }
+    }
+    .floating-popup {
+      animation: floatUpFade 1.35s forwards cubic-bezier(0.16, 1, 0.3, 1);
+      text-shadow: 0 3px 10px rgba(0,0,0,0.85), 0 1px 2px #000;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
+    ::-webkit-scrollbar-thumb { background: rgba(239, 68, 68, 0.6); border-radius: 3px; }
+  </style>
+</head>
+<body>
+<div id="game-container">
+  <!-- Canvases -->
+  <canvas id="bg-canvas"></canvas>
+  <canvas id="three-canvas"></canvas>
+  <canvas id="hud-canvas"></canvas>
+
+  <!-- Floating Stunt / Alert Popups Container -->
+  <div id="popup-container" class="absolute inset-x-0 top-24 flex flex-col items-center pointer-events-none z-20 space-y-1"></div>
+
+  <!-- UI Overlay Layer -->
+  <div id="ui-layer" class="flex flex-col justify-between p-3 sm:p-5">
+
+    <!-- TOP BAR HUD (Shown During Gameplay) -->
+    <div id="gameplay-top-hud" class="hidden w-full flex flex-wrap items-start justify-between gap-2">
+      <!-- Top-Left: Fuel, Coins, Distance -->
+      <div class="bg-slate-950/85 backdrop-blur-md border border-slate-700/80 rounded-2xl p-3 sm:p-3.5 shadow-2xl min-w-[230px] sm:min-w-[275px]">
+        <!-- Fuel Row -->
+        <div class="flex items-center gap-2.5 mb-2.5">
+          <div id="fuel-alarm-icon" class="w-8 h-8 rounded-lg bg-red-600/90 flex items-center justify-center shadow-md border border-red-400/50" title="Fuel Tank">
+            <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M19.77 7.23l.01-.01-3.72-3.72L15 4.56l2.11 2.11c-.94.36-1.61 1.26-1.61 2.33 0 1.38 1.12 2.5 2.5 2.5.36 0 .69-.08 1-.21v7.21c0 .55-.45 1-1 1s-1-.45-1-1V14c0-1.1-.9-2-2-2h-1V5c0-1.1-.9-2-2-2H6c-1.1 0-2 .9-2 2v16h10v-7.5h1.5v5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V9c0-.69-.28-1.32-.73-1.77zM12 10H6V5h6v5z"/>
+            </svg>
+          </div>
+          <div class="flex-1">
+            <div class="flex justify-between items-center text-[11px] font-bold tracking-wider uppercase mb-1">
+              <span class="text-slate-300">FUEL TANK</span>
+              <span id="fuel-pct-label" class="text-emerald-400">100%</span>
+            </div>
+            <div class="w-full h-3.5 bg-slate-800 rounded-full overflow-hidden border border-slate-600/80 p-0.5">
+              <div id="fuel-bar-fill" class="h-full bg-gradient-to-r from-red-500 via-amber-400 to-emerald-400 rounded-full transition-all duration-75" style="width: 100%;"></div>
+            </div>
+          </div>
+        </div>
+        <!-- Wheelie / Flip Danger Flashing Banner -->
+        <div id="wheelie-danger-banner" class="hidden low-fuel-flash bg-amber-500/95 text-slate-950 text-[11px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md text-center mb-1.5 border border-yellow-200 shadow">
+          ⚠ FLIP DANGER! TAP BRAKE (A / ←) TO BALANCE!
+        </div>
+        <!-- Low Fuel Flashing Banner -->
+        <div id="low-fuel-banner" class="hidden low-fuel-flash bg-red-600/90 text-white text-[11px] font-extrabold uppercase tracking-widest px-2.5 py-1 rounded-md text-center mb-2 border border-red-300 shadow">
+          ⚠ LOW FUEL WARNING! FIND JERRYCAN!
+        </div>
+
+        <!-- Challenge Mode Target Bar (Hidden in Endless Mode) -->
+        <div id="hud-challenge-box" class="hidden mb-2 bg-indigo-950/90 border border-indigo-500/50 rounded-xl px-2.5 py-1.5">
+          <div class="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-indigo-300">
+            <span id="hud-challenge-goal">TARGET: 500m</span>
+            <span id="hud-challenge-timer" class="text-amber-300 text-xs">⏱ 60.0s</span>
+          </div>
+        </div>
+
+        <!-- Coins & Distance Grid -->
+        <div class="grid grid-cols-2 gap-2 pt-1.5 border-t border-slate-800/90">
+          <div class="flex items-center gap-2 bg-slate-900/90 px-2.5 py-1.5 rounded-xl border border-amber-500/30">
+            <div class="w-6 h-6 rounded-full bg-gradient-to-br from-yellow-300 via-amber-400 to-amber-600 flex items-center justify-center text-slate-950 font-black text-xs shadow">₵</div>
+            <div>
+              <div class="text-[10px] text-slate-400 font-bold uppercase leading-none">COINS</div>
+              <div id="hud-coins" class="text-sm sm:text-base font-black text-amber-300 leading-tight">0</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 bg-slate-900/90 px-2.5 py-1.5 rounded-xl border border-sky-500/30">
+            <div class="w-6 h-6 rounded-full bg-sky-500/20 border border-sky-400/50 flex items-center justify-center text-sky-300 font-black text-xs">m</div>
+            <div>
+              <div class="text-[10px] text-slate-400 font-bold uppercase leading-none">DISTANCE</div>
+              <div class="text-sm sm:text-base font-black text-white leading-tight">
+                <span id="hud-distance">0</span>m
+                <span class="text-[10px] text-slate-400 font-semibold block">BEST: <span id="hud-best-distance">0</span>m</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top-Right: Stage Badge, Active Car, Audio & Menu Controls -->
+      <div class="flex items-center gap-2 interactive">
+        <div class="hidden sm:flex flex-col items-end bg-slate-950/85 backdrop-blur-md border border-slate-700/80 px-3.5 py-2 rounded-xl">
+          <div class="flex items-center gap-1.5">
+            <span id="hud-stage-name" class="text-xs font-extrabold uppercase tracking-wider text-red-400">STAGE 1: ALPINE VILLAGE</span>
+            <span id="hud-diff-mode-badge" class="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">EASY • ENDLESS</span>
+          </div>
+          <span id="hud-stunt-Summary" class="text-[11px] text-slate-300 font-semibold">
+            <span id="hud-car-name" class="text-amber-300 font-bold">X6 Sportback</span> • Flips: <b id="hud-flips">0</b> | Air: <b id="hud-air-count">0</b>
+          </span>
+        </div>
+        <button id="btn-mute" class="bg-slate-950/85 hover:bg-slate-800 active:scale-95 text-white border border-slate-700 rounded-xl p-2.5 shadow-lg transition" title="Toggle Sound">
+          <span id="mute-icon-label" class="text-xs font-bold px-1">🔊 SFX ON</span>
+        </button>
+        <button id="btn-pause-garage" class="bg-red-600/90 hover:bg-red-500 active:scale-95 text-white font-extrabold text-xs uppercase tracking-wider px-3.5 py-2.5 rounded-xl border border-red-400/50 shadow-lg transition">
+          ☰ MENU / GARAGE
+        </button>
+      </div>
+    </div>
+
+    <!-- BOTTOM CONTROLS (BRAKE & GAS PEDALS) -->
+    <div id="gameplay-bottom-controls" class="hidden w-full flex items-end justify-between pb-1 sm:pb-2 pointer-events-none">
+      <!-- BRAKE PEDAL (Bottom-Left) -->
+      <div class="interactive flex flex-col items-center">
+        <span class="text-[10px] sm:text-xs font-black tracking-widest uppercase text-slate-300 bg-slate-950/85 px-2.5 py-0.5 rounded-full border border-slate-700 mb-1.5 shadow">
+          ◄ BRAKE / TILT DOWN (A / ←)
+        </span>
+        <button id="pedal-brake" class="pedal-btn w-24 h-28 sm:w-28 sm:h-36 rounded-2xl bg-gradient-to-b from-slate-600 via-slate-700 to-slate-900 border-2 border-red-500/80 flex flex-col items-center justify-between p-3 text-white select-none">
+          <div class="w-full flex justify-between px-1">
+            <span class="w-2 h-2 rounded-full bg-slate-400"></span>
+            <span class="w-2 h-2 rounded-full bg-slate-400"></span>
+          </div>
+          <div class="w-full space-y-1.5 px-1">
+            <div class="h-2 bg-slate-950/80 rounded-full border border-slate-500/40"></div>
+            <div class="h-2 bg-slate-950/80 rounded-full border border-slate-500/40"></div>
+            <div class="h-2 bg-slate-950/80 rounded-full border border-slate-500/40"></div>
+          </div>
+          <div class="bg-red-600/90 w-full py-1 rounded-lg text-center font-black text-xs sm:text-sm tracking-wider uppercase shadow-inner">
+            BRAKE
+          </div>
+        </button>
+      </div>
+
+      <!-- Spacer for Bottom-Center Analog Gauges (drawn on hud-canvas) -->
+      <div class="hidden sm:block w-64 h-1"></div>
+
+      <!-- GAS PEDAL (Bottom-Right) -->
+      <div class="interactive flex flex-col items-center">
+        <span class="text-[10px] sm:text-xs font-black tracking-widest uppercase text-slate-300 bg-slate-950/85 px-2.5 py-0.5 rounded-full border border-slate-700 mb-1.5 shadow">
+          GAS / TILT UP (D / →) ►
+        </span>
+        <button id="pedal-gas" class="pedal-btn w-24 h-32 sm:w-28 sm:h-40 rounded-2xl bg-gradient-to-b from-zinc-500 via-zinc-700 to-zinc-900 border-2 border-emerald-500/80 flex flex-col items-center justify-between p-3 text-white select-none">
+          <div class="w-full flex justify-between px-1">
+            <span class="w-2 h-2 rounded-full bg-zinc-300"></span>
+            <span class="w-2 h-2 rounded-full bg-zinc-300"></span>
+          </div>
+          <div class="w-full space-y-2 px-1.5">
+            <div class="h-2 bg-zinc-950/85 rounded-full border border-zinc-400/40"></div>
+            <div class="h-2 bg-zinc-950/85 rounded-full border border-zinc-400/40"></div>
+            <div class="h-2 bg-zinc-950/85 rounded-full border border-zinc-400/40"></div>
+            <div class="h-2 bg-zinc-950/85 rounded-full border border-zinc-400/40"></div>
+          </div>
+          <div class="bg-emerald-600 w-full py-1.5 rounded-lg text-center font-black text-xs sm:text-sm tracking-wider uppercase shadow-inner">
+            GAS
+          </div>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN MENU: VEHICLE LINEUP, STAGE SELECTION & GARAGE UPGRADES MODAL -->
+  <div id="menu-modal" class="interactive absolute inset-0 z-30 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
+    <div class="w-full max-w-6xl bg-slate-900/95 border border-slate-700/90 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[96vh]">
+      
+      <!-- Modal Header -->
+      <div class="bg-gradient-to-r from-red-950 via-slate-900 to-slate-900 px-4 sm:px-6 py-3 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-red-500 to-red-800 flex items-center justify-center shadow-lg border border-red-400/50 font-black text-base">
+            X6
+          </div>
+          <div>
+            <h1 class="text-base sm:text-lg font-black tracking-tight text-white flex items-center gap-2">
+              HILL CLIMB X6: 3D SPORTBACK & OFF-ROAD GARAGE
+              <span class="text-[10px] bg-red-600/90 text-white px-2 py-0.5 rounded-full font-extrabold uppercase">4 Vehicles • 3 Stages</span>
+            </h1>
+            <p class="text-[11px] text-slate-400">High-Detail Showroom Vehicles • Distinct Asphalt/Soil Road Cross-Section • Seamless Sky & Ground</p>
+          </div>
+        </div>
+
+        <!-- Player Wallet & Audio Toggle -->
+        <div class="flex items-center gap-2.5">
+          <div class="flex items-center gap-2 bg-slate-950 px-3.5 py-1.5 rounded-2xl border border-amber-500/40 shadow-inner">
+            <div class="w-6 h-6 rounded-full bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center">₵</div>
+            <div>
+              <div class="text-[9px] uppercase font-bold text-slate-400">TOTAL COINS</div>
+              <div id="menu-total-coins" class="text-sm sm:text-base font-black text-amber-300">500</div>
+            </div>
+          </div>
+          <button id="btn-menu-sound" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold px-3 py-2 rounded-xl border border-slate-600 transition">
+            🔊 SFX: ON
+          </button>
+        </div>
+      </div>
+
+      <!-- Modal Body Scrollable -->
+      <div class="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+        
+        <!-- SECTION 0: DIFFICULTY (EASY / MEDIUM / HARD) & 2 GAME MODES -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 bg-slate-950/80 border border-slate-800/90 rounded-2xl p-3">
+          <!-- Difficulty Level Selector (7 cols) -->
+          <div class="lg:col-span-7 flex flex-col justify-between">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-xs font-black uppercase tracking-wider text-amber-400">⚡ SELECT DIFFICULTY LEVEL</span>
+              <span id="diff-desc-label" class="text-[11px] text-emerald-400 font-semibold">Smooth Hills • Slow Fuel Drain • Extra Grip</span>
+            </div>
+            <div class="grid grid-cols-3 gap-2">
+              <button id="diff-btn-easy" onclick="selectDifficulty('easy')" class="py-2 px-3 rounded-xl border-2 border-emerald-500 bg-emerald-500/20 text-white font-black text-xs uppercase tracking-wider transition flex flex-col items-center">
+                <span>🟢 EASY</span>
+                <span class="text-[10px] font-semibold text-emerald-300 mt-0.5">Chill Climb • 1.0x Coins</span>
+              </button>
+              <button id="diff-btn-medium" onclick="selectDifficulty('medium')" class="py-2 px-3 rounded-xl border-2 border-slate-800 bg-slate-900 text-slate-300 font-black text-xs uppercase tracking-wider transition flex flex-col items-center">
+                <span>🟡 MEDIUM</span>
+                <span class="text-[10px] font-semibold text-amber-300 mt-0.5">Balanced • 1.5x Coins</span>
+              </button>
+              <button id="diff-btn-hard" onclick="selectDifficulty('hard')" class="py-2 px-3 rounded-xl border-2 border-slate-800 bg-slate-900 text-slate-300 font-black text-xs uppercase tracking-wider transition flex flex-col items-center">
+                <span>🔴 HARD</span>
+                <span class="text-[10px] font-semibold text-rose-400 mt-0.5">Extreme • 2.5x Coins</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 2 Game Modes Selector (5 cols) -->
+          <div class="lg:col-span-5 flex flex-col justify-between">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-xs font-black uppercase tracking-wider text-sky-400">🎮 SELECT GAME MODE (2 MODES)</span>
+              <span id="gamemode-desc-label" class="text-[11px] text-sky-300 font-semibold">Drive as far as possible!</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <button id="gmode-btn-endless" onclick="selectGameMode('endless')" class="py-2 px-3 rounded-xl border-2 border-sky-500 bg-sky-500/20 text-white font-black text-xs uppercase tracking-wider transition flex flex-col items-center">
+                <span>♾ MODE 1: ENDLESS</span>
+                <span class="text-[10px] font-semibold text-sky-300 mt-0.5">Classic Survival Climb</span>
+              </button>
+              <button id="gmode-btn-challenge" onclick="selectGameMode('challenge')" class="py-2 px-3 rounded-xl border-2 border-slate-800 bg-slate-900 text-slate-300 font-black text-xs uppercase tracking-wider transition flex flex-col items-center">
+                <span>⏱ MODE 2: TIME TRIAL</span>
+                <span class="text-[10px] font-semibold text-indigo-300 mt-0.5">Beat Target Before 0s</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- SECTION 1: SELECT VEHICLE (4 DISTINCT CARS) -->
+        <div>
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <h2 class="text-xs sm:text-sm font-black uppercase tracking-wider text-slate-200">
+              1. SELECT YOUR VEHICLE (4 CUSTOM MODELS)
+            </h2>
+            <span class="text-[11px] text-slate-400">All 4 vehicles unlocked — each has unique weight, torque, wheel size & suspension</span>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <!-- Car 0: Red BMW X6 Sportback SUV -->
+            <div id="vehicle-card-0" onclick="selectVehicle(0)" class="cursor-pointer rounded-2xl border-2 border-red-500 bg-slate-950/90 p-3 flex flex-col justify-between transition hover:-translate-y-0.5 shadow-lg">
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-red-600/20 text-red-400 border border-red-500/30">SPORTBACK SUV</span>
+                  <span id="vehicle-badge-0" class="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-red-600 text-white">ACTIVE</span>
+                </div>
+                <h3 class="font-black text-sm text-white">Crimson X6M Coupe-SUV</h3>
+                <div class="grid grid-cols-2 gap-1.5 my-2 bg-slate-900 p-1.5 rounded-xl border border-slate-800">
+                  <img src="assets/images/x6-front-quarter.png" alt="X6 3/4 View" class="w-full h-14 object-contain rounded" />
+                  <img src="assets/images/x6-side-profile.jpg" alt="X6 Side View" class="w-full h-14 object-contain rounded" />
+                </div>
+                <p class="text-[11px] text-slate-400 leading-snug">Showroom crimson paint, sloped fastback glasshouse, 5-spoke alloys & balanced AWD climb dynamics.</p>
+              </div>
+              <div class="mt-2 pt-1.5 border-t border-slate-800/80 flex justify-between text-[10px] text-slate-300 font-bold">
+                <span>Speed: ★★★★☆</span>
+                <span>Grip: ★★★★☆</span>
+              </div>
+            </div>
+
+            <!-- Car 1: 4x4 Rubicon Off-Road Jeep Crawler -->
+            <div id="vehicle-card-1" onclick="selectVehicle(1)" class="cursor-pointer rounded-2xl border-2 border-slate-800 bg-slate-950/90 p-3 flex flex-col justify-between transition hover:-translate-y-0.5 shadow-lg">
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">4x4 TRAIL CRAWLER</span>
+                  <span id="vehicle-badge-1" class="hidden text-[10px] font-black uppercase px-2 py-0.5 rounded bg-red-600 text-white">ACTIVE</span>
+                </div>
+                <h3 class="font-black text-sm text-white">Defender 4x4 Rock Crawler</h3>
+                <div class="my-2 bg-slate-900 p-2 rounded-xl border border-slate-800 flex items-center justify-center h-[68px]">
+                  <svg viewBox="0 0 220 80" class="w-full h-full">
+                    <rect x="35" y="18" width="115" height="34" rx="5" fill="#f59e0b" stroke="#fef08a" stroke-width="1.5"/>
+                    <rect x="140" y="30" width="42" height="22" rx="4" fill="#d97706"/>
+                    <rect x="48" y="23" width="38" height="16" rx="2" fill="#0f172a"/>
+                    <rect x="94" y="23" width="38" height="16" rx="2" fill="#0f172a"/>
+                    <rect x="45" y="12" width="90" height="5" rx="2" fill="#1e293b"/>
+                    <circle cx="52" cy="10" r="3.5" fill="#fef08a"/>
+                    <circle cx="72" cy="10" r="3.5" fill="#fef08a"/>
+                    <circle cx="92" cy="10" r="3.5" fill="#fef08a"/>
+                    <circle cx="112" cy="10" r="3.5" fill="#fef08a"/>
+                    <rect x="24" y="26" width="10" height="22" rx="3" fill="#18181b"/>
+                    <circle cx="65" cy="56" r="17" fill="#18181b" stroke="#52525b" stroke-width="3"/>
+                    <circle cx="65" cy="56" r="8" fill="#fbbf24"/>
+                    <circle cx="152" cy="56" r="17" fill="#18181b" stroke="#52525b" stroke-width="3"/>
+                    <circle cx="152" cy="56" r="8" fill="#fbbf24"/>
+                  </svg>
+                </div>
+                <p class="text-[11px] text-slate-400 leading-snug">Heavy-duty roll cage, roof LED light bar, rear spare tire & high-clearance rock suspension.</p>
+              </div>
+              <div class="mt-2 pt-1.5 border-t border-slate-800/80 flex justify-between text-[10px] text-slate-300 font-bold">
+                <span>Climb: ★★★★★</span>
+                <span>Suspension: ★★★★★</span>
+              </div>
+            </div>
+
+            <!-- Car 2: Hyper GT Cyber Supercar -->
+            <div id="vehicle-card-2" onclick="selectVehicle(2)" class="cursor-pointer rounded-2xl border-2 border-slate-800 bg-slate-950/90 p-3 flex flex-col justify-between transition hover:-translate-y-0.5 shadow-lg">
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30">V10 HYPER GT</span>
+                  <span id="vehicle-badge-2" class="hidden text-[10px] font-black uppercase px-2 py-0.5 rounded bg-red-600 text-white">ACTIVE</span>
+                </div>
+                <h3 class="font-black text-sm text-white">Aero Blade V10 Supercar</h3>
+                <div class="my-2 bg-slate-900 p-2 rounded-xl border border-slate-800 flex items-center justify-center h-[68px]">
+                  <svg viewBox="0 0 220 80" class="w-full h-full">
+                    <path d="M25 48 L35 32 L85 24 L135 24 L188 38 L195 48 L190 54 L25 54 Z" fill="#0ea5e9" stroke="#bae6fd" stroke-width="1.5"/>
+                    <path d="M78 26 L130 26 L160 37 L68 37 Z" fill="#0f172a"/>
+                    <path d="M22 30 L36 30 L32 42 L24 42 Z" fill="#0f172a"/>
+                    <circle cx="66" cy="54" r="15" fill="#18181b" stroke="#38bdf8" stroke-width="2.5"/>
+                    <circle cx="66" cy="54" r="7" fill="#e2e8f0"/>
+                    <circle cx="156" cy="54" r="15" fill="#18181b" stroke="#38bdf8" stroke-width="2.5"/>
+                    <circle cx="156" cy="54" r="7" fill="#e2e8f0"/>
+                  </svg>
+                </div>
+                <p class="text-[11px] text-slate-400 leading-snug">Ultra-sleek wedge aero body, GT rear wing, low center of gravity & blistering launch speed for ramps.</p>
+              </div>
+              <div class="mt-2 pt-1.5 border-t border-slate-800/80 flex justify-between text-[10px] text-slate-300 font-bold">
+                <span>Speed: ★★★★★</span>
+                <span>Flips: ★★★★★</span>
+              </div>
+            </div>
+
+            <!-- Car 3: Mega Monster Truck -->
+            <div id="vehicle-card-3" onclick="selectVehicle(3)" class="cursor-pointer rounded-2xl border-2 border-slate-800 bg-slate-950/90 p-3 flex flex-col justify-between transition hover:-translate-y-0.5 shadow-lg">
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">MONSTER 4X4</span>
+                  <span id="vehicle-badge-3" class="hidden text-[10px] font-black uppercase px-2 py-0.5 rounded bg-red-600 text-white">ACTIVE</span>
+                </div>
+                <h3 class="font-black text-sm text-white">Goliath 6.2L Monster Truck</h3>
+                <div class="my-2 bg-slate-900 p-2 rounded-xl border border-slate-800 flex items-center justify-center h-[68px]">
+                  <svg viewBox="0 0 220 80" class="w-full h-full">
+                    <path d="M35 34 L70 34 L82 16 L138 16 L152 28 L185 30 L185 44 L35 44 Z" fill="#10b981" stroke="#a7f3d0" stroke-width="1.5"/>
+                    <rect x="90" y="19" width="42" height="13" rx="2" fill="#0f172a"/>
+                    <circle cx="66" cy="56" r="20" fill="#18181b" stroke="#34d399" stroke-width="3"/>
+                    <circle cx="66" cy="56" r="9" fill="#10b981"/>
+                    <circle cx="154" cy="56" r="20" fill="#18181b" stroke="#34d399" stroke-width="3"/>
+                    <circle cx="154" cy="56" r="9" fill="#10b981"/>
+                  </svg>
+                </div>
+                <p class="text-[11px] text-slate-400 leading-snug">Oversized mud-terrain tires, lifted coilover frame & unstoppable torque over jagged highland bumps.</p>
+              </div>
+              <div class="mt-2 pt-1.5 border-t border-slate-800/80 flex justify-between text-[10px] text-slate-300 font-bold">
+                <span>Torque: ★★★★★</span>
+                <span>Clearance: ★★★★★</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SECTION 2: 3 SELECTABLE MOUNTAIN STAGES -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="text-xs sm:text-sm font-black uppercase tracking-wider text-slate-200">
+              2. SELECT MOUNTAIN BIOME STAGE
+            </h2>
+            <span class="text-xs text-slate-400">High-contrast road surface + seamless horizon sky</span>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <!-- Stage 1: Alpine Village Valley -->
+            <div id="stage-card-0" onclick="selectStage(0)" class="cursor-pointer rounded-2xl border-2 border-red-500 bg-slate-950/90 overflow-hidden flex flex-col justify-between transition transform hover:-translate-y-0.5 shadow-lg">
+              <div>
+                <div class="relative h-24 w-full overflow-hidden bg-sky-900">
+                  <img src="assets/images/stage1-alpine-valley.jpg" alt="Alpine Village Valley" class="w-full h-full object-cover" />
+                  <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-black/30"></div>
+                  <span class="absolute top-2 left-2 bg-sky-500 text-slate-950 font-black text-[10px] px-2 py-0.5 rounded-md uppercase">STAGE 1</span>
+                  <span id="stage-badge-0" class="absolute top-2 right-2 bg-red-600 text-white font-black text-[10px] px-2 py-0.5 rounded-md uppercase">SELECTED</span>
+                </div>
+                <div class="p-2.5">
+                  <h3 class="font-black text-sm text-white">Alpine Village Valley</h3>
+                  <p class="text-[11px] text-slate-400 mt-0.5 leading-snug">Snow-dusted rocky peak, pine forests & dark alpine asphalt/timber trail with crisp yellow road edge.</p>
+                </div>
+              </div>
+              <div class="px-3 pb-2 pt-1 border-t border-slate-800/80 flex justify-between items-center text-[11px]">
+                <span class="text-slate-400">Best Record:</span>
+                <span id="stage-best-0" class="font-black text-sky-400">0m</span>
+              </div>
+            </div>
+
+            <!-- Stage 2: Highland Golden Ridge -->
+            <div id="stage-card-1" onclick="selectStage(1)" class="cursor-pointer rounded-2xl border-2 border-slate-800 bg-slate-950/90 overflow-hidden flex flex-col justify-between transition transform hover:-translate-y-0.5 shadow-lg">
+              <div>
+                <div class="relative h-24 w-full overflow-hidden bg-amber-900">
+                  <img src="assets/images/stage2-highland-ridge.jpg" alt="Highland Golden Ridge" class="w-full h-full object-cover" />
+                  <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-black/30"></div>
+                  <span class="absolute top-2 left-2 bg-amber-400 text-slate-950 font-black text-[10px] px-2 py-0.5 rounded-md uppercase">STAGE 2</span>
+                  <span id="stage-badge-1" class="hidden absolute top-2 right-2 bg-red-600 text-white font-black text-[10px] px-2 py-0.5 rounded-md uppercase">SELECTED</span>
+                </div>
+                <div class="p-2.5">
+                  <h3 class="font-black text-sm text-white">Highland Golden Ridge</h3>
+                  <p class="text-[11px] text-slate-400 mt-0.5 leading-snug">Golden mountain ridge with rich dark terracotta & basalt rock trail that stands out sharply against the hills.</p>
+                </div>
+              </div>
+              <div class="px-3 pb-2 pt-1 border-t border-slate-800/80 flex justify-between items-center text-[11px]">
+                <span class="text-slate-400">Best Record:</span>
+                <span id="stage-best-1" class="font-black text-amber-400">0m</span>
+              </div>
+            </div>
+
+            <!-- Stage 3: Stormy Green Downs -->
+            <div id="stage-card-2" onclick="selectStage(2)" class="cursor-pointer rounded-2xl border-2 border-slate-800 bg-slate-950/90 overflow-hidden flex flex-col justify-between transition transform hover:-translate-y-0.5 shadow-lg">
+              <div>
+                <div class="relative h-24 w-full overflow-hidden bg-slate-800">
+                  <svg viewBox="0 0 300 140" class="w-full h-full object-cover">
+                    <defs>
+                      <linearGradient id="stormSky" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#1e293b"/>
+                        <stop offset="55%" stop-color="#475569"/>
+                        <stop offset="100%" stop-color="#94a3b8"/>
+                      </linearGradient>
+                      <linearGradient id="greenDown1" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#4d7c0f"/>
+                        <stop offset="100%" stop-color="#14532d"/>
+                      </linearGradient>
+                      <linearGradient id="greenDown2" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#65a30d"/>
+                        <stop offset="100%" stop-color="#365314"/>
+                      </linearGradient>
+                    </defs>
+                    <rect width="300" height="140" fill="url(#stormSky)"/>
+                    <path d="M0 95 Q75 55 155 85 T300 65 L300 140 L0 140 Z" fill="url(#greenDown1)" opacity="0.85"/>
+                    <path d="M0 112 Q95 70 190 108 T300 82 L300 140 L0 140 Z" fill="#1e293b" stroke="#facc15" stroke-width="3"/>
+                  </svg>
+                  <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-black/30"></div>
+                  <span class="absolute top-2 left-2 bg-emerald-400 text-slate-950 font-black text-[10px] px-2 py-0.5 rounded-md uppercase">STAGE 3</span>
+                  <span id="stage-badge-2" class="hidden absolute top-2 right-2 bg-red-600 text-white font-black text-[10px] px-2 py-0.5 rounded-md uppercase">SELECTED</span>
+                </div>
+                <div class="p-2.5">
+                  <h3 class="font-black text-sm text-white">Stormy Green Downs</h3>
+                  <p class="text-[11px] text-slate-400 mt-0.5 leading-snug">Moody storm clouds & dark slate highway ramps over emerald valleys for huge stunt air time.</p>
+                </div>
+              </div>
+              <div class="px-3 pb-2 pt-1 border-t border-slate-800/80 flex justify-between items-center text-[11px]">
+                <span class="text-slate-400">Best Record:</span>
+                <span id="stage-best-2" class="font-black text-emerald-400">0m</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SECTION 3: 4-PART GARAGE UPGRADE SYSTEM -->
+        <div>
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <h2 class="text-xs sm:text-sm font-black uppercase tracking-wider text-slate-200">
+              3. GARAGE PERFORMANCE UPGRADES (LEVELS 1 – 10 • PERSISTENT)
+            </h2>
+            <div class="flex items-center gap-2">
+              <button id="btn-test-coins" class="text-[11px] font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 px-2.5 py-1 rounded-lg transition">
+                +1,000 Practice Coins
+              </button>
+              <button id="btn-reset-save" class="text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-400 px-2.5 py-1 rounded-lg border border-slate-700 transition">
+                Reset Progress
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <!-- Upgrade 1: Engine -->
+            <div class="bg-slate-950/90 border border-slate-800 rounded-2xl p-3 flex flex-col justify-between">
+              <div>
+                <div class="flex justify-between items-start mb-1">
+                  <div class="w-8 h-8 rounded-xl bg-red-500/20 border border-red-500/40 flex items-center justify-center text-red-400 font-black text-sm">⚡</div>
+                  <span id="upg-lvl-engine" class="text-xs font-black bg-slate-800 text-white px-2.5 py-0.5 rounded-full border border-slate-700">LVL 1 / 10</span>
+                </div>
+                <h3 class="font-black text-sm text-white">V8 Twin-Turbo Engine</h3>
+                <p class="text-[11px] text-slate-400 mt-0.5">Boosts horsepower, top speed & hill-climbing torque.</p>
+                <div id="upg-bars-engine" class="grid grid-cols-10 gap-1 my-2"></div>
+              </div>
+              <button id="btn-upg-engine" onclick="buyUpgrade('engine')" class="w-full py-2 rounded-xl font-black text-xs uppercase tracking-wider bg-amber-400 hover:bg-amber-300 text-slate-950 transition shadow">
+                UPGRADE • ₵150
+              </button>
+            </div>
+
+            <!-- Upgrade 2: Suspension -->
+            <div class="bg-slate-950/90 border border-slate-800 rounded-2xl p-3 flex flex-col justify-between">
+              <div>
+                <div class="flex justify-between items-start mb-1">
+                  <div class="w-8 h-8 rounded-xl bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-400 font-black text-sm">🔩</div>
+                  <span id="upg-lvl-suspension" class="text-xs font-black bg-slate-800 text-white px-2.5 py-0.5 rounded-full border border-slate-700">LVL 1 / 10</span>
+                </div>
+                <h3 class="font-black text-sm text-white">Coilover Suspension</h3>
+                <p class="text-[11px] text-slate-400 mt-0.5">Improves spring stiffness & shock absorption on jumps.</p>
+                <div id="upg-bars-suspension" class="grid grid-cols-10 gap-1 my-2"></div>
+              </div>
+              <button id="btn-upg-suspension" onclick="buyUpgrade('suspension')" class="w-full py-2 rounded-xl font-black text-xs uppercase tracking-wider bg-amber-400 hover:bg-amber-300 text-slate-950 transition shadow">
+                UPGRADE • ₵150
+              </button>
+            </div>
+
+            <!-- Upgrade 3: Tires -->
+            <div class="bg-slate-950/90 border border-slate-800 rounded-2xl p-3 flex flex-col justify-between">
+              <div>
+                <div class="flex justify-between items-start mb-1">
+                  <div class="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 font-black text-sm">🛞</div>
+                  <span id="upg-lvl-tires" class="text-xs font-black bg-slate-800 text-white px-2.5 py-0.5 rounded-full border border-slate-700">LVL 1 / 10</span>
+                </div>
+                <h3 class="font-black text-sm text-white">All-Terrain Grip Tires</h3>
+                <p class="text-[11px] text-slate-400 mt-0.5">Increases traction on steep slopes & reduces wheel slip.</p>
+                <div id="upg-bars-tires" class="grid grid-cols-10 gap-1 my-2"></div>
+              </div>
+              <button id="btn-upg-tires" onclick="buyUpgrade('tires')" class="w-full py-2 rounded-xl font-black text-xs uppercase tracking-wider bg-amber-400 hover:bg-amber-300 text-slate-950 transition shadow">
+                UPGRADE • ₵150
+              </button>
+            </div>
+
+            <!-- Upgrade 4: 4WD / Fuel Tank -->
+            <div class="bg-slate-950/90 border border-slate-800 rounded-2xl p-3 flex flex-col justify-between">
+              <div>
+                <div class="flex justify-between items-start mb-1">
+                  <div class="w-8 h-8 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-400 font-black text-sm">⛽</div>
+                  <span id="upg-lvl-fuel4wd" class="text-xs font-black bg-slate-800 text-white px-2.5 py-0.5 rounded-full border border-slate-700">LVL 1 / 10</span>
+                </div>
+                <h3 class="font-black text-sm text-white">4WD & Extended Tank</h3>
+                <p class="text-[11px] text-slate-400 mt-0.5">Balances AWD power & expands total fuel capacity.</p>
+                <div id="upg-bars-fuel4wd" class="grid grid-cols-10 gap-1 my-2"></div>
+              </div>
+              <button id="btn-upg-fuel4wd" onclick="buyUpgrade('fuel4wd')" class="w-full py-2 rounded-xl font-black text-xs uppercase tracking-wider bg-amber-400 hover:bg-amber-300 text-slate-950 transition shadow">
+                UPGRADE • ₵150
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal Footer: Launch Button & Reference Link -->
+      <div class="bg-slate-950 px-4 sm:px-6 py-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+          <span>Controls: <b class="text-slate-200">D / Right Arrow</b> (Gas & Backflip) • <b class="text-slate-200">A / Left Arrow</b> (Brake & Frontflip)</span>
+          <a href="https://play.google.com/store/apps/details?id=com.fingersoft.hillclimb&hl=en" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:text-sky-300 underline font-semibold">
+            Reference: Hill Climb Racing (Google Play) ↗
+          </a>
+          <span class="text-slate-500">•</span>
+          <span class="text-[11px] font-bold text-slate-300 tracking-wide">Developed by <a href="https://github.com/mahfuz10-max" target="_blank" rel="noopener noreferrer" class="text-red-400 hover:text-red-300 underline">Mahfuz</a></span>
+        </div>
+        <button id="btn-start-run" class="w-full sm:w-auto px-8 py-3 rounded-2xl bg-gradient-to-r from-red-600 via-red-500 to-orange-500 hover:from-red-500 hover:to-orange-400 active:scale-95 text-white font-black text-sm sm:text-base uppercase tracking-wider shadow-xl shadow-red-600/30 transition">
+          ▶ START CLIMB RUN
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- POST-RUN SUMMARY / GAME OVER MODAL -->
+  <div id="gameover-modal" class="hidden interactive absolute inset-0 z-30 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="w-full max-w-lg bg-slate-900 border-2 border-red-500/70 rounded-3xl shadow-2xl overflow-hidden p-5 sm:p-6 text-center space-y-4">
+      <div id="gameover-badge" class="inline-block bg-red-600/20 border border-red-500 text-red-300 font-black text-xs uppercase tracking-widest px-3.5 py-1 rounded-full">
+        RUN COMPLETE
+      </div>
+      <h2 id="gameover-title" class="text-2xl sm:text-3xl font-black text-white tracking-tight">
+        DRIVER DOWN / NECK FLIP!
+      </h2>
+      <p id="gameover-subtitle" class="text-xs sm:text-sm text-slate-300">
+        Your vehicle landed upside down on the roof!
+      </p>
+
+      <!-- Stats Grid -->
+      <div class="grid grid-cols-2 gap-3 bg-slate-950/90 p-4 rounded-2xl border border-slate-800 text-left">
+        <div class="bg-slate-900/90 p-3 rounded-xl border border-slate-800">
+          <div class="text-[10px] font-bold uppercase text-slate-400">DISTANCE DRIVEN</div>
+          <div id="summary-distance" class="text-xl font-black text-white">0m</div>
+        </div>
+        <div class="bg-slate-900/90 p-3 rounded-xl border border-slate-800">
+          <div class="text-[10px] font-bold uppercase text-slate-400">STAGE BEST RECORD</div>
+          <div id="summary-best" class="text-xl font-black text-sky-400">0m</div>
+        </div>
+        <div class="bg-slate-900/90 p-3 rounded-xl border border-slate-800">
+          <div class="text-[10px] font-bold uppercase text-slate-400">COINS COLLECTED</div>
+          <div id="summary-coins" class="text-xl font-black text-amber-400">+0</div>
+        </div>
+        <div class="bg-slate-900/90 p-3 rounded-xl border border-slate-800">
+          <div class="text-[10px] font-bold uppercase text-slate-400">STUNTS & FLIPS</div>
+          <div id="summary-stunts" class="text-xl font-black text-emerald-400">0</div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2">
+        <button id="btn-summary-garage" class="w-full py-3 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs uppercase tracking-wider shadow transition">
+          🔧 UPGRADE GARAGE
+        </button>
+        <button id="btn-summary-stage" class="w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-black text-xs uppercase tracking-wider border border-slate-600 transition">
+          🏔 CHANGE STAGE
+        </button>
+        <button id="btn-summary-retry" class="w-full py-3 rounded-xl bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-500 hover:to-orange-400 text-white font-black text-xs uppercase tracking-wider shadow-lg transition">
+          ↻ PLAY AGAIN
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================================
+   1. PERSISTENT STATE, 4 VEHICLES & 3 HIGH-CONTRAST STAGE DEFINITIONS
+============================================================================ */
+const STORAGE_KEY = 'hill_climb_x6_save_v2';
+
+const VEHICLES = [
+  {
+    id: 0,
+    name: 'Crimson X6M Coupe-SUV',
+    shortName: 'X6 Sportback',
+    wheelBaseHalf: 1.56,
+    wheelRadius: 0.92,
+    chassisClearance: 0.42,
+    speedMult: 1.05,
+    torqueMult: 1.02,
+    springMult: 1.0,
+    airFlipMult: 1.0
+  },
+  {
+    id: 1,
+    name: 'Defender 4x4 Rock Crawler',
+    shortName: '4x4 Crawler',
+    wheelBaseHalf: 1.58,
+    wheelRadius: 0.98,
+    chassisClearance: 0.52,
+    speedMult: 0.96,
+    torqueMult: 1.18,
+    springMult: 1.15,
+    airFlipMult: 0.95
+  },
+  {
+    id: 2,
+    name: 'Aero Blade V10 Supercar',
+    shortName: 'V10 Hyper GT',
+    wheelBaseHalf: 1.62,
+    wheelRadius: 0.86,
+    chassisClearance: 0.34,
+    speedMult: 1.22,
+    torqueMult: 0.98,
+    springMult: 1.08,
+    airFlipMult: 1.15
+  },
+  {
+    id: 3,
+    name: 'Goliath 6.2L Monster Truck',
+    shortName: 'Monster Truck',
+    wheelBaseHalf: 1.66,
+    wheelRadius: 1.14,
+    chassisClearance: 0.68,
+    speedMult: 1.0,
+    torqueMult: 1.28,
+    springMult: 1.25,
+    airFlipMult: 1.05
+  }
+];
+
+const STAGES = [
+  {
+    id: 0,
+    name: 'Alpine Village Valley',
+    badge: 'STAGE 1: ALPINE VILLAGE',
+    bgImageSrc: 'assets/images/stage1-alpine-valley.jpg',
+    skyTop: '#0284c7',
+    skyBottom: '#bae6fd',
+    // High-contrast road colors so road never blends with green pine background
+    asphaltTop: '#1e293b',
+    asphaltStripe: '#facc15',
+    curbShoulder: '#15803d',
+    subSoilColor: '#451a03',
+    subRockColor: '#27272a',
+    dustColor: '#a16207',
+    gravity: 22.5,
+    baseTraction: 1.05,
+    roughness: 1.0,
+    steepnessScale: 1.0,
+    rampFactor: 0.25
+  },
+  {
+    id: 1,
+    name: 'Highland Golden Ridge',
+    badge: 'STAGE 2: HIGHLAND RIDGE',
+    bgImageSrc: 'assets/images/stage2-highland-ridge.jpg',
+    skyTop: '#94a3b8',
+    skyBottom: '#fef3c7',
+    // High-contrast dark terracotta & basalt trail against golden-green hills
+    asphaltTop: '#292524',
+    asphaltStripe: '#fb923c',
+    curbShoulder: '#b45309',
+    subSoilColor: '#431407',
+    subRockColor: '#1c1917',
+    dustColor: '#d97706',
+    gravity: 23.0,
+    baseTraction: 0.98,
+    roughness: 1.38,
+    steepnessScale: 1.25,
+    rampFactor: 0.35
+  },
+  {
+    id: 2,
+    name: 'Stormy Green Downs',
+    badge: 'STAGE 3: STORMY DOWNS',
+    bgImageSrc: null,
+    skyTop: '#0f172a',
+    skyBottom: '#64748b',
+    // High-contrast dark slate highway with neon amber strip against green hills
+    asphaltTop: '#0f172a',
+    asphaltStripe: '#38bdf8',
+    curbShoulder: '#4d7c0f',
+    subSoilColor: '#1e293b',
+    subRockColor: '#090d16',
+    dustColor: '#65a30d',
+    gravity: 21.0,
+    baseTraction: 1.0,
+    roughness: 0.85,
+    steepnessScale: 1.18,
+    rampFactor: 0.85
+  }
+];
+
+const DIFFICULTIES = {
+  easy: {
+    id: 'easy',
+    label: 'EASY',
+    desc: 'Smooth & Fun Climb • Stable Suspension • Gentle Wheelies (+1.0x Coins)',
+    steepMult: 0.90,
+    roughMult: 0.85,
+    fuelDrainMult: 0.78,
+    gripMult: 1.15,
+    wheelieMult: 0.75,
+    airRotMult: 0.95,
+    slopeAlignStiff: 10.5,
+    coinMult: 1.0,
+    targetDist: 400,
+    timeLimit: 68,
+    winBonus: 1500
+  },
+  medium: {
+    id: 'medium',
+    label: 'MEDIUM',
+    desc: 'Balanced Hill Climb • Realistic Wheelie on Steep Slopes & Jumps (+1.5x Coins)',
+    steepMult: 1.18,
+    roughMult: 1.10,
+    fuelDrainMult: 0.95,
+    gripMult: 1.08,
+    wheelieMult: 1.05,
+    airRotMult: 1.12,
+    slopeAlignStiff: 7.8,
+    coinMult: 1.5,
+    targetDist: 600,
+    timeLimit: 62,
+    winBonus: 3000
+  },
+  hard: {
+    id: 'hard',
+    label: 'HARD',
+    desc: 'Steep Ridges & Big Air • Control Throttle on Crests (+2.5x Coins)',
+    steepMult: 1.42,
+    roughMult: 1.32,
+    fuelDrainMult: 1.12,
+    gripMult: 1.02,
+    wheelieMult: 1.35,
+    airRotMult: 1.28,
+    slopeAlignStiff: 5.5,
+    coinMult: 2.5,
+    targetDist: 800,
+    timeLimit: 56,
+    winBonus: 6000
+  }
+};
+
+const GAME_MODES = {
+  endless: {
+    id: 'endless',
+    label: 'ENDLESS CLIMB',
+    shortLabel: 'ENDLESS',
+    desc: 'Drive as far as possible without running out of fuel!'
+  },
+  challenge: {
+    id: 'challenge',
+    label: 'TIME TRIAL CHALLENGE',
+    shortLabel: 'TIME TRIAL',
+    desc: 'Reach the target finish distance before the countdown timer hits 0!'
+  }
+};
+
+let saveData = {
+  coins: 500,
+  selectedDifficulty: 'medium',
+  selectedGameMode: 'endless',
+  selectedVehicle: 0,
+  selectedStage: 0,
+  bestDistances: { 0: 0, 1: 0, 2: 0 },
+  upgrades: {
+    engine: 1,
+    suspension: 1,
+    tires: 1,
+    fuel4wd: 1
+  }
+};
+
+function loadSaveData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('hill_climb_x6_save_v1');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      saveData.coins = typeof parsed.coins === 'number' ? parsed.coins : 500;
+      saveData.selectedDifficulty = DIFFICULTIES[parsed.selectedDifficulty] ? parsed.selectedDifficulty : 'medium';
+      saveData.selectedGameMode = GAME_MODES[parsed.selectedGameMode] ? parsed.selectedGameMode : 'endless';
+      saveData.selectedVehicle = typeof parsed.selectedVehicle === 'number' ? parsed.selectedVehicle : 0;
+      saveData.selectedStage = typeof parsed.selectedStage === 'number' ? parsed.selectedStage : 0;
+      if (parsed.bestDistances) {
+        saveData.bestDistances = { 0: 0, 1: 0, 2: 0, ...parsed.bestDistances };
+      }
+      if (parsed.upgrades) {
+        saveData.upgrades = {
+          engine: Math.min(10, Math.max(1, parsed.upgrades.engine || 1)),
+          suspension: Math.min(10, Math.max(1, parsed.upgrades.suspension || 1)),
+          tires: Math.min(10, Math.max(1, parsed.upgrades.tires || 1)),
+          fuel4wd: Math.min(10, Math.max(1, parsed.upgrades.fuel4wd || 1))
+        };
+      }
+    }
+  } catch (e) {
+    // Fallback to in-memory default
+  }
+}
+
+function writeSaveData() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(saveData));
+  } catch (e) {
+    // Ignore sandbox errors
+  }
+}
+
+function getUpgradeCost(level) {
+  return Math.round(150 * Math.pow(1.55, level - 1));
+}
+
+/* ============================================================================
+   2. WEB AUDIO SYNTHESIZER (ENGINE REV, COIN, FUEL, STUNT, CRASH)
+============================================================================ */
+class SoundController {
+  constructor() {
+    this.ctx = null;
+    this.muted = false;
+    this.engineOsc = null;
+    this.engineSubOsc = null;
+    this.engineGain = null;
+    this.initialized = false;
+  }
+
+  init() {
+    if (this.initialized) return;
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      this.ctx = new AudioCtx();
+
+      this.engineOsc = this.ctx.createOscillator();
+      this.engineSubOsc = this.ctx.createOscillator();
+      this.engineGain = this.ctx.createGain();
+
+      this.engineOsc.type = 'sawtooth';
+      this.engineSubOsc.type = 'triangle';
+      this.engineOsc.frequency.value = 55;
+      this.engineSubOsc.frequency.value = 27.5;
+
+      this.engineGain.gain.value = 0.0;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 340;
+
+      this.engineOsc.connect(filter);
+      this.engineSubOsc.connect(filter);
+      filter.connect(this.engineGain);
+      this.engineGain.connect(this.ctx.destination);
+
+      this.engineOsc.start();
+      this.engineSubOsc.start();
+      this.initialized = true;
+    } catch (e) {}
+  }
+
+  resume() {
+    if (!this.initialized) this.init();
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
+  }
+
+  updateEngine(rpmNormalized, active) {
+    if (!this.initialized || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    if (this.muted || !active) {
+      this.engineGain.gain.setTargetAtTime(0, now, 0.08);
+      return;
+    }
+    const baseFreq = 46 + rpmNormalized * 135;
+    this.engineOsc.frequency.setTargetAtTime(baseFreq, now, 0.05);
+    this.engineSubOsc.frequency.setTargetAtTime(baseFreq * 0.5, now, 0.05);
+    this.engineGain.gain.setTargetAtTime(0.055 + rpmNormalized * 0.06, now, 0.06);
+  }
+
+  playCoin() {
+    if (this.muted || !this.initialized || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(987.77, now);
+    osc.frequency.setValueAtTime(1318.51, now + 0.065);
+    gain.gain.setValueAtTime(0.14, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.26);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.26);
+  }
+
+  playFuel() {
+    if (this.muted || !this.initialized || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(330, now);
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.32);
+    gain.gain.setValueAtTime(0.18, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.35);
+  }
+
+  playStunt() {
+    if (this.muted || !this.initialized || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    [523.25, 659.25, 783.99, 1046.5].forEach((freq, idx) => {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.055);
+      gain.gain.setValueAtTime(0.11, now + idx * 0.055);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.055 + 0.24);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now + idx * 0.055);
+      osc.stop(now + idx * 0.055 + 0.24);
+    });
+  }
+
+  playCrash() {
+    if (this.muted || !this.initialized || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(140, now);
+    osc.frequency.exponentialRampToValueAtTime(32, now + 0.45);
+    gain.gain.setValueAtTime(0.24, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.48);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.48);
+  }
+}
+
+const sfx = new SoundController();
+
+/* ============================================================================
+   3. PRELOAD STAGE BACKGROUND IMAGES
+============================================================================ */
+const bgImages = {};
+STAGES.forEach(st => {
+  if (st.bgImageSrc) {
+    const img = new Image();
+    img.src = st.bgImageSrc;
+    bgImages[st.id] = img;
+  }
+});
+
+/* ============================================================================
+   4. PROCEDURAL TERRAIN & PICKUPS GENERATOR
+============================================================================ */
+function getTerrainHeight(x, stageId) {
+  if (x <= 10) return 0;
+  const blend = Math.min(1, (x - 10) / 22);
+  const st = STAGES[stageId];
+  const diff = DIFFICULTIES[saveData.selectedDifficulty] || DIFFICULTIES.medium;
+  // Gradual progression over 550m so first 150m is very approachable and fun
+  const prog = (1 + Math.min(2.2, Math.max(0, x) / 550)) * st.steepnessScale * diff.steepMult;
+  const rough = st.roughness * diff.roughMult;
+
+  // Smooth launch crests every ~55m for enjoyable air time and optional flips
+  const kicker = Math.pow(Math.max(0, Math.sin(x * 0.115)), 4) * 1.25 * rough;
+
+  let h = 0;
+  if (stageId === 0) {
+    h = Math.sin(x * 0.078) * 2.6 * prog
+      + Math.sin(x * 0.032 + 1.2) * 5.4 * prog
+      + Math.cos(x * 0.16) * 0.85 * rough
+      + kicker * 0.65;
+  } else if (stageId === 1) {
+    h = Math.sin(x * 0.072) * 3.3 * prog
+      + Math.sin(x * 0.029 + 0.6) * 6.4 * prog
+      + Math.sin(x * 0.21) * 1.15 * rough
+      + Math.cos(x * 0.38) * 0.35 * rough
+      + kicker * 0.85;
+  } else {
+    const wave = Math.sin(x * 0.052) * 5.6 * prog + Math.sin(x * 0.022) * 7.4 * prog;
+    const ramp = Math.pow(Math.max(0, Math.sin(x * 0.088)), 3) * 5.0 * st.rampFactor * prog;
+    h = wave + ramp + kicker;
+  }
+  return h * blend;
+}
+
+function getTerrainSlope(x, stageId) {
+  const eps = 0.25;
+  const y1 = getTerrainHeight(x - eps, stageId);
+  const y2 = getTerrainHeight(x + eps, stageId);
+  return (y2 - y1) / (2 * eps);
+}
+
+/* ============================================================================
+   5. THREE.JS SCENE, 4 SHOWROOM-GRADE 3D VEHICLES & 3D ROAD RIBBON
+============================================================================ */
+const bgCanvas = document.getElementById('bg-canvas');
+const bgCtx = bgCanvas.getContext('2d');
+const threeCanvas = document.getElementById('three-canvas');
+const hudCanvas = document.getElementById('hud-canvas');
+const hudCtx = hudCanvas.getContext('2d');
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 250);
+camera.position.set(0, 3.2, 21.5);
+
+const renderer = new THREE.WebGLRenderer({
+  canvas: threeCanvas,
+  alpha: true,
+  antialias: true
+});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+// Showroom Multi-Directional Lighting for Automotive Paint Gloss & Contours
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0x334155, 0.85);
+scene.add(hemiLight);
+
+const keyLight = new THREE.DirectionalLight(0xfffbeb, 1.35);
+keyLight.position.set(8, 22, 24);
+scene.add(keyLight);
+
+const frontFillLight = new THREE.DirectionalLight(0xe0f2fe, 0.65);
+frontFillLight.position.set(-10, 6, 20);
+scene.add(frontFillLight);
+
+// Detailed 5-Spoke Dual-Tone Wheel Builder (with custom radius & tire thickness)
+function createDetailedWheel(radius = 0.92, isOffroad = false, rimAccentColor = 0xe4e4e7) {
+  const wheelRoot = new THREE.Group();
+
+  // Tire Outer Tread Cylinder
+  const width = isOffroad ? 0.78 : 0.64;
+  const tireGeo = new THREE.CylinderGeometry(radius, radius, width, 32);
+  tireGeo.rotateX(Math.PI / 2);
+  const tireMat = new THREE.MeshStandardMaterial({
+    color: 0x141417,
+    roughness: 0.88,
+    metalness: 0.08
+  });
+  wheelRoot.add(new THREE.Mesh(tireGeo, tireMat));
+
+  // Off-road knobby tread lugs around circumference
+  if (isOffroad) {
+    const lugCount = 18;
+    const lugGeo = new THREE.BoxGeometry(0.14, 0.09, width + 0.04);
+    for (let i = 0; i < lugCount; i++) {
+      const a = (i / lugCount) * Math.PI * 2;
+      const lug = new THREE.Mesh(lugGeo, tireMat);
+      lug.position.set(Math.cos(a) * (radius - 0.01), Math.sin(a) * (radius - 0.01), 0);
+      lug.rotation.z = a + Math.PI / 2;
+      wheelRoot.add(lug);
+    }
+  }
+
+  // Sidewall Alloy Rim Ring
+  const rimR = radius * 0.70;
+  const rimOuterGeo = new THREE.CylinderGeometry(rimR, rimR, width + 0.03, 28);
+  rimOuterGeo.rotateX(Math.PI / 2);
+  const darkAlloyMat = new THREE.MeshStandardMaterial({
+    color: 0x18181b,
+    roughness: 0.25,
+    metalness: 0.85
+  });
+  wheelRoot.add(new THREE.Mesh(rimOuterGeo, darkAlloyMat));
+
+  // Brushed Steel Brake Rotor Disc
+  const rotorR = rimR * 0.74;
+  const rotorGeo = new THREE.CylinderGeometry(rotorR, rotorR, width + 0.04, 24);
+  rotorGeo.rotateX(Math.PI / 2);
+  const rotorMat = new THREE.MeshStandardMaterial({
+    color: 0x71717a,
+    roughness: 0.35,
+    metalness: 0.88
+  });
+  wheelRoot.add(new THREE.Mesh(rotorGeo, rotorMat));
+
+  // Brembo-style Red Brake Caliper
+  const caliperGeo = new THREE.BoxGeometry(rotorR * 0.48, rotorR * 0.62, width + 0.06);
+  const caliperMat = new THREE.MeshStandardMaterial({
+    color: 0xdc2626,
+    roughness: 0.25,
+    metalness: 0.4
+  });
+  const caliper = new THREE.Mesh(caliperGeo, caliperMat);
+  caliper.position.set(-rotorR * 0.56, rotorR * 0.32, 0);
+  wheelRoot.add(caliper);
+
+  // 5-Spoke Machined Split-Star Spokes (Matching Reference Image)
+  const spokeMat = new THREE.MeshStandardMaterial({
+    color: rimAccentColor,
+    roughness: 0.16,
+    metalness: 0.92
+  });
+  for (let i = 0; i < 5; i++) {
+    const angle = (i * Math.PI * 2) / 5;
+    const sGroup = new THREE.Group();
+    sGroup.rotation.z = angle;
+
+    const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.065, rimR * 0.88, width + 0.08), spokeMat);
+    b1.position.set(0.055, rimR * 0.44, 0);
+    b1.rotation.z = -0.15;
+    sGroup.add(b1);
+
+    const b2 = new THREE.Mesh(new THREE.BoxGeometry(0.065, rimR * 0.88, width + 0.08), spokeMat);
+    b2.position.set(-0.055, rimR * 0.44, 0);
+    b2.rotation.z = 0.15;
+    sGroup.add(b2);
+
+    wheelRoot.add(sGroup);
+  }
+
+  // Center Cap + 5 Lug Nuts
+  const capGeo = new THREE.CylinderGeometry(rimR * 0.22, rimR * 0.22, width + 0.11, 16);
+  capGeo.rotateX(Math.PI / 2);
+  wheelRoot.add(new THREE.Mesh(capGeo, darkAlloyMat));
+
+  return wheelRoot;
+}
+
+// Create Driver Mesh with Helmet/Cap & Spring Head Pivot
+function createDriverRig(xOffset, yOffset) {
+  const driverGroup = new THREE.Group();
+  driverGroup.position.set(xOffset, yOffset, 0);
+
+  const torso = new THREE.Mesh(
+    new THREE.BoxGeometry(0.38, 0.46, 0.48),
+    new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 })
+  );
+  torso.position.set(0, -0.1, 0);
+  driverGroup.add(torso);
+
+  const headPivot = new THREE.Group();
+  headPivot.position.set(0.02, 0.22, 0);
+  driverGroup.add(headPivot);
+
+  const headMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.22, 18, 18),
+    new THREE.MeshStandardMaterial({ color: 0xfdba74, roughness: 0.45 })
+  );
+  headPivot.add(headMesh);
+
+  const helmetTop = new THREE.Mesh(
+    new THREE.SphereGeometry(0.235, 18, 18, 0, Math.PI * 2, 0, Math.PI * 0.58),
+    new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.2, metalness: 0.3 })
+  );
+  headPivot.add(helmetTop);
+
+  const visor = new THREE.Mesh(
+    new THREE.BoxGeometry(0.24, 0.11, 0.36),
+    new THREE.MeshStandardMaterial({ color: 0x090d16, roughness: 0.1, metalness: 0.8 })
+  );
+  visor.position.set(0.13, 0.04, 0);
+  headPivot.add(visor);
+
+  return { driverGroup, headPivot };
+}
+
+// BUILD ALL 4 SHOWROOM-GRADE 3D VEHICLES
+function buildVehicleMeshes() {
+  const root = new THREE.Group();
+  const variants = [];
+
+  // Shared Materials
+  const blackTrimMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.35, metalness: 0.2 });
+  const darkWellMat = new THREE.MeshStandardMaterial({ color: 0x090a0f, roughness: 0.9 });
+  const glassMat = new THREE.MeshPhysicalMaterial({
+    color: 0x0f172a,
+    roughness: 0.08,
+    metalness: 0.35,
+    clearcoat: 1.0,
+    transparent: true,
+    opacity: 0.88
+  });
+  const headlightMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    emissive: 0xe0f2fe,
+    emissiveIntensity: 0.85,
+    roughness: 0.1
+  });
+  const taillightMat = new THREE.MeshStandardMaterial({
+    color: 0xef4444,
+    emissive: 0xdc2626,
+    emissiveIntensity: 0.9,
+    roughness: 0.15
+  });
+  const chromeMat = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, metalness: 0.92, roughness: 0.15 });
+
+  /* -----------------------------------------------------------------------
+     MODEL 0: CRIMSON RED BMW X6 SPORTBACK COUPE-SUV (Matched to Reference)
+  ----------------------------------------------------------------------- */
+  {
+    const chassis = new THREE.Group();
+    const crimsonPaint = new THREE.MeshPhysicalMaterial({
+      color: 0xd91b24,
+      roughness: 0.18,
+      metalness: 0.28,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.08
+    });
+
+    // Lower Sculpted Body Profile (Smooth Coupe-SUV Fastback Silhouette)
+    const lowerShape = new THREE.Shape();
+    lowerShape.moveTo(-2.65, 0.28);
+    lowerShape.lineTo(-2.78, 0.62);
+    lowerShape.lineTo(-2.68, 1.32); // High rear haunch
+    lowerShape.lineTo(-2.12, 1.48); // Integrated rear deck spoiler lip
+    lowerShape.lineTo(1.22, 1.24);  // Beltline to A-pillar base
+    lowerShape.bezierCurveTo(1.88, 1.18, 2.45, 1.02, 2.72, 0.84); // Sculpted powerdome hood
+    lowerShape.lineTo(2.80, 0.30);  // Aggressive front bumper
+    lowerShape.lineTo(2.48, 0.12);
+    lowerShape.lineTo(-2.45, 0.14);
+    lowerShape.closePath();
+
+    const lowerGeo = new THREE.ExtrudeGeometry(lowerShape, {
+      depth: 1.92,
+      bevelEnabled: true,
+      bevelSegments: 5,
+      steps: 1,
+      bevelSize: 0.10,
+      bevelThickness: 0.10
+    });
+    lowerGeo.center();
+    const lowerMesh = new THREE.Mesh(lowerGeo, crimsonPaint);
+    lowerMesh.position.set(0, 0.82, 0);
+    chassis.add(lowerMesh);
+
+    // Tapered Fastback Roof & Upper Cabin (Narrower than fenders for realistic tumblehome)
+    const roofShape = new THREE.Shape();
+    roofShape.moveTo(-2.18, 1.32);
+    roofShape.bezierCurveTo(-1.38, 1.98, -0.35, 2.12, 0.38, 2.02);
+    roofShape.lineTo(1.28, 1.22);
+    roofShape.lineTo(-2.18, 1.32);
+    const roofGeo = new THREE.ExtrudeGeometry(roofShape, {
+      depth: 1.62,
+      bevelEnabled: true,
+      bevelSegments: 4,
+      steps: 1,
+      bevelSize: 0.08,
+      bevelThickness: 0.08
+    });
+    roofGeo.center();
+    const roofMesh = new THREE.Mesh(roofGeo, crimsonPaint);
+    roofMesh.position.set(-0.42, 1.62, 0);
+    chassis.add(roofMesh);
+
+    // Flush Recessed Dark Tinted Coupe Side Windows (with Hofmeister kink)
+    const glassShape = new THREE.Shape();
+    glassShape.moveTo(-1.75, 1.36);
+    glassShape.bezierCurveTo(-1.05, 1.86, -0.28, 1.96, 0.32, 1.88);
+    glassShape.lineTo(1.10, 1.24);
+    glassShape.lineTo(-1.58, 1.26);
+    glassShape.closePath();
+    const glassGeo = new THREE.ExtrudeGeometry(glassShape, {
+      depth: 1.78,
+      bevelEnabled: true,
+      bevelSegments: 2,
+      steps: 1,
+      bevelSize: 0.02,
+      bevelThickness: 0.02
+    });
+    glassGeo.center();
+    const sideGlass = new THREE.Mesh(glassGeo, glassMat);
+    sideGlass.position.set(-0.32, 1.56, 0);
+    chassis.add(sideGlass);
+
+    // Front & Rear Windshield Glass Panels
+    const windshield = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.08, 1.58), glassMat);
+    windshield.position.set(0.84, 1.60, 0);
+    windshield.rotation.z = -0.68;
+    chassis.add(windshield);
+
+    const rearGlass = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.08, 1.54), glassMat);
+    rearGlass.position.set(-1.32, 1.68, 0);
+    rearGlass.rotation.z = 0.46;
+    chassis.add(rearGlass);
+
+    // Black Window Pillars (B-pillar & C-pillar split)
+    const bPillar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.66, 1.83), blackTrimMat);
+    bPillar.position.set(-0.18, 1.55, 0);
+    bPillar.rotation.z = -0.08;
+    chassis.add(bPillar);
+
+    const cPillar = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.50, 1.83), blackTrimMat);
+    cPillar.position.set(-1.02, 1.50, 0);
+    cPillar.rotation.z = 0.32;
+    chassis.add(cPillar);
+
+    // Muscular Flared Fender Arches & Deep Black Wheel Wells (No hollow see-through gap!)
+    const wellGeo = new THREE.CylinderGeometry(1.06, 1.06, 2.16, 24, 1, false, 0, Math.PI);
+    wellGeo.rotateX(Math.PI / 2);
+    const frontWell = new THREE.Mesh(wellGeo, darkWellMat);
+    frontWell.position.set(1.56, 0.35, 0);
+    chassis.add(frontWell);
+
+    const rearWell = new THREE.Mesh(wellGeo, darkWellMat);
+    rearWell.position.set(-1.56, 0.35, 0);
+    chassis.add(rearWell);
+
+    // Black Rocker Panel Side Skirt & Character Crease Line
+    const rockerSkirt = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.14, 2.08), blackTrimMat);
+    rockerSkirt.position.set(0, 0.26, 0);
+    chassis.add(rockerSkirt);
+
+    const sideCrease = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.045, 2.14), crimsonPaint);
+    sideCrease.position.set(-0.15, 0.98, 0);
+    sideCrease.rotation.z = -0.05;
+    chassis.add(sideCrease);
+
+    // Sculpted Door Handles & Side Mirrors
+    const handleF = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.06, 2.16), crimsonPaint);
+    handleF.position.set(0.22, 1.08, 0);
+    chassis.add(handleF);
+    const handleR = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.06, 2.16), crimsonPaint);
+    handleR.position.set(-0.82, 1.14, 0);
+    chassis.add(handleR);
+
+    const mirror = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.17, 2.40), crimsonPaint);
+    mirror.position.set(0.75, 1.26, 0);
+    chassis.add(mirror);
+
+    // Swept-Back Projector Headlights, Lower Fog Bezel & Kidney Grille
+    const hlMesh = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.20, 1.96), headlightMat);
+    hlMesh.position.set(2.58, 0.86, 0);
+    hlMesh.rotation.z = -0.20;
+    chassis.add(hlMesh);
+
+    const fogIntake = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.22, 1.98), blackTrimMat);
+    fogIntake.position.set(2.68, 0.45, 0);
+    chassis.add(fogIntake);
+
+    const fogLamp = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 2.02, 12), headlightMat);
+    fogLamp.rotateX(Math.PI / 2);
+    fogLamp.position.set(2.70, 0.45, 0);
+    chassis.add(fogLamp);
+
+    // L-Shaped Ruby LED Taillights & Rear Diffuser with Dual Chrome Exhausts
+    const tlMesh = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, 1.98), taillightMat);
+    tlMesh.position.set(-2.62, 1.18, 0);
+    tlMesh.rotation.z = 0.18;
+    chassis.add(tlMesh);
+
+    const rearDiffuser = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.22, 1.96), blackTrimMat);
+    rearDiffuser.position.set(-2.66, 0.36, 0);
+    chassis.add(rearDiffuser);
+
+    const exTip = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.35, 14), chromeMat);
+    exTip.rotateZ(Math.PI / 2);
+    exTip.position.set(-2.75, 0.36, 0.65);
+    chassis.add(exTip);
+
+    const drv = createDriverRig(0.15, 1.48);
+    chassis.add(drv.driverGroup);
+
+    const wRear = createDetailedWheel(0.92, false, 0xf4f4f5);
+    const wFront = createDetailedWheel(0.92, false, 0xf4f4f5);
+
+    variants.push({ chassis, headPivot: drv.headPivot, wRear, wFront });
+  }
+
+  /* -----------------------------------------------------------------------
+     MODEL 1: DEFENDER 4x4 OFF-ROAD ROCK CRAWLER JEEP
+  ----------------------------------------------------------------------- */
+  {
+    const chassis = new THREE.Group();
+    const amberPaint = new THREE.MeshPhysicalMaterial({
+      color: 0xf59e0b,
+      roughness: 0.24,
+      metalness: 0.22,
+      clearcoat: 0.85
+    });
+
+    const bodyBox = new THREE.Mesh(new THREE.BoxGeometry(5.1, 0.92, 1.98), amberPaint);
+    bodyBox.position.set(0, 0.82, 0);
+    chassis.add(bodyBox);
+
+    const cabinBox = new THREE.Mesh(new THREE.BoxGeometry(2.85, 0.86, 1.86), amberPaint);
+    cabinBox.position.set(-0.42, 1.62, 0);
+    chassis.add(cabinBox);
+
+    // Side Windows
+    const winF = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.58, 1.92), glassMat);
+    winF.position.set(0.25, 1.62, 0);
+    chassis.add(winF);
+
+    const winR = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.58, 1.92), glassMat);
+    winR.position.set(-1.08, 1.62, 0);
+    chassis.add(winR);
+
+    // Heavy-Duty Black Fender Flares & Wheel Wells
+    const wellGeo = new THREE.CylinderGeometry(1.12, 1.12, 2.22, 20, 1, false, 0, Math.PI);
+    wellGeo.rotateX(Math.PI / 2);
+    const fWell = new THREE.Mesh(wellGeo, blackTrimMat);
+    fWell.position.set(1.58, 0.42, 0);
+    chassis.add(fWell);
+
+    const rWell = new THREE.Mesh(wellGeo, blackTrimMat);
+    rWell.position.set(-1.58, 0.42, 0);
+    chassis.add(rWell);
+
+    // Roof Rack + LED Light Bar + Rear Spare Tire
+    const rack = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.10, 1.76), blackTrimMat);
+    rack.position.set(-0.42, 2.10, 0);
+    chassis.add(rack);
+
+    const ledBar = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.14, 1.55), headlightMat);
+    ledBar.position.set(0.85, 2.12, 0);
+    chassis.add(ledBar);
+
+    const spareTire = createDetailedWheel(0.75, true, 0xfbbf24);
+    spareTire.rotation.y = Math.PI / 2;
+    spareTire.position.set(-2.78, 1.18, 0);
+    chassis.add(spareTire);
+
+    // Bullbar & Winch
+    const bullBar = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.65, 1.92), blackTrimMat);
+    bullBar.position.set(2.66, 0.72, 0);
+    chassis.add(bullBar);
+
+    const hl = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.28, 1.78), headlightMat);
+    hl.position.set(2.58, 0.96, 0);
+    chassis.add(hl);
+
+    const drv = createDriverRig(0.18, 1.52);
+    chassis.add(drv.driverGroup);
+
+    const wRear = createDetailedWheel(0.98, true, 0xfbbf24);
+    const wFront = createDetailedWheel(0.98, true, 0xfbbf24);
+
+    variants.push({ chassis, headPivot: drv.headPivot, wRear, wFront });
+  }
+
+  /* -----------------------------------------------------------------------
+     MODEL 2: AERO BLADE V10 HYPER GT SUPERCAR
+  ----------------------------------------------------------------------- */
+  {
+    const chassis = new THREE.Group();
+    const cyberBluePaint = new THREE.MeshPhysicalMaterial({
+      color: 0x0284c7,
+      roughness: 0.12,
+      metalness: 0.42,
+      clearcoat: 1.0
+    });
+
+    const wedgeShape = new THREE.Shape();
+    wedgeShape.moveTo(-2.72, 0.24);
+    wedgeShape.lineTo(-2.82, 0.78);
+    wedgeShape.lineTo(-1.65, 1.08);
+    wedgeShape.lineTo(-0.35, 1.56);
+    wedgeShape.lineTo(0.82, 1.48);
+    wedgeShape.lineTo(2.15, 0.82);
+    wedgeShape.lineTo(2.88, 0.42);
+    wedgeShape.lineTo(2.75, 0.14);
+    wedgeShape.lineTo(-2.60, 0.14);
+    wedgeShape.closePath();
+
+    const wedgeGeo = new THREE.ExtrudeGeometry(wedgeShape, {
+      depth: 1.96,
+      bevelEnabled: true,
+      bevelSegments: 4,
+      steps: 1,
+      bevelSize: 0.08,
+      bevelThickness: 0.08
+    });
+    wedgeGeo.center();
+    const wedgeMesh = new THREE.Mesh(wedgeGeo, cyberBluePaint);
+    wedgeMesh.position.set(0, 0.72, 0);
+    chassis.add(wedgeMesh);
+
+    // Teardrop Canopy Glass
+    const canopyShape = new THREE.Shape();
+    canopyShape.moveTo(-1.35, 1.02);
+    canopyShape.lineTo(-0.28, 1.48);
+    canopyShape.lineTo(0.75, 1.42);
+    canopyShape.lineTo(1.68, 0.88);
+    canopyShape.closePath();
+    const canopyGeo = new THREE.ExtrudeGeometry(canopyShape, { depth: 1.62, bevelEnabled: false });
+    canopyGeo.center();
+    const canopyMesh = new THREE.Mesh(canopyGeo, glassMat);
+    canopyMesh.position.set(0.12, 1.12, 0);
+    chassis.add(canopyMesh);
+
+    // Carbon GT Rear Wing
+    const wingPylon = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.52, 1.2), blackTrimMat);
+    wingPylon.position.set(-2.48, 1.15, 0);
+    wingPylon.rotation.z = 0.28;
+    chassis.add(wingPylon);
+
+    const wingBlade = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.08, 2.12), blackTrimMat);
+    wingBlade.position.set(-2.62, 1.42, 0);
+    wingBlade.rotation.z = -0.12;
+    chassis.add(wingBlade);
+
+    // Wheel Wells & Side Intake Blades
+    const wellGeo = new THREE.CylinderGeometry(0.98, 0.98, 2.16, 20, 1, false, 0, Math.PI);
+    wellGeo.rotateX(Math.PI / 2);
+    const fWell = new THREE.Mesh(wellGeo, darkWellMat);
+    fWell.position.set(1.62, 0.30, 0);
+    chassis.add(fWell);
+
+    const rWell = new THREE.Mesh(wellGeo, darkWellMat);
+    rWell.position.set(-1.62, 0.30, 0);
+    chassis.add(rWell);
+
+    const laserHL = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.12, 1.92), headlightMat);
+    laserHL.position.set(2.55, 0.56, 0);
+    laserHL.rotation.z = -0.24;
+    chassis.add(laserHL);
+
+    const ledTL = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.14, 1.98), taillightMat);
+    ledTL.position.set(-2.76, 0.74, 0);
+    chassis.add(ledTL);
+
+    const drv = createDriverRig(0.12, 1.15);
+    chassis.add(drv.driverGroup);
+
+    const wRear = createDetailedWheel(0.86, false, 0x38bdf8);
+    const wFront = createDetailedWheel(0.86, false, 0x38bdf8);
+
+    variants.push({ chassis, headPivot: drv.headPivot, wRear, wFront });
+  }
+
+  /* -----------------------------------------------------------------------
+     MODEL 3: GOLIATH 6.2L MONSTER TRUCK
+  ----------------------------------------------------------------------- */
+  {
+    const chassis = new THREE.Group();
+    const emeraldPaint = new THREE.MeshPhysicalMaterial({
+      color: 0x10b981,
+      roughness: 0.2,
+      metalness: 0.3,
+      clearcoat: 0.9
+    });
+
+    // High Lifted Pickup Body
+    const truckBed = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.82, 2.02), emeraldPaint);
+    truckBed.position.set(0, 1.18, 0);
+    chassis.add(truckBed);
+
+    const truckCab = new THREE.Mesh(new THREE.BoxGeometry(2.35, 0.85, 1.90), emeraldPaint);
+    truckCab.position.set(0.25, 1.92, 0);
+    chassis.add(truckCab);
+
+    const cabWin = new THREE.Mesh(new THREE.BoxGeometry(1.85, 0.56, 1.95), glassMat);
+    cabWin.position.set(0.28, 1.94, 0);
+    chassis.add(cabWin);
+
+    // Heavy Tubular Cage Frame & Exposed Monster Struts
+    const cageFrame = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.45, 1.55), blackTrimMat);
+    cageFrame.position.set(0, 0.62, 0);
+    chassis.add(cageFrame);
+
+    const chromeBumper = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.32, 2.12), chromeMat);
+    chromeBumper.position.set(2.65, 1.02, 0);
+    chassis.add(chromeBumper);
+
+    const hl = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.28, 1.88), headlightMat);
+    hl.position.set(2.58, 1.28, 0);
+    chassis.add(hl);
+
+    const drv = createDriverRig(0.25, 1.85);
+    chassis.add(drv.driverGroup);
+
+    const wRear = createDetailedWheel(1.14, true, 0x34d399);
+    const wFront = createDetailedWheel(1.14, true, 0x34d399);
+
+    variants.push({ chassis, headPivot: drv.headPivot, wRear, wFront });
+  }
+
+  return { root, variants };
+}
+
+const garage3D = buildVehicleMeshes();
+scene.add(garage3D.root);
+
+// Visible Coilover Spring Struts connecting Chassis to Front & Rear Axles
+const strutMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, metalness: 0.7, roughness: 0.25 });
+const rearStrutMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.9, 12), strutMat);
+const frontStrutMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.9, 12), strutMat);
+garage3D.root.add(rearStrutMesh);
+garage3D.root.add(frontStrutMesh);
+
+let activeVariantIndex = -1;
+function activateVehicle3D(vehicleId) {
+  if (activeVariantIndex === vehicleId) return;
+  // Remove previous variant children
+  if (activeVariantIndex >= 0) {
+    const prev = garage3D.variants[activeVariantIndex];
+    garage3D.root.remove(prev.chassis);
+    garage3D.root.remove(prev.wRear);
+    garage3D.root.remove(prev.wFront);
+  }
+  const curr = garage3D.variants[vehicleId];
+  garage3D.root.add(curr.chassis);
+  garage3D.root.add(curr.wRear);
+  garage3D.root.add(curr.wFront);
+  activeVariantIndex = vehicleId;
+}
+activateVehicle3D(0);
+
+// 3D Collectible Coins & Fuel Jerrycans Pool
+const pickupsGroup = new THREE.Group();
+scene.add(pickupsGroup);
+
+/* ============================================================================
+   6. CORE 2.5D SPRING-DAMPER VEHICLE PHYSICS & GAMEPLAY ENGINE
+============================================================================ */
+let gameState = {
+  mode: 'MENU', // 'MENU', 'PLAYING', 'GAMEOVER'
+  vehicleId: 0,
+  stageId: 0,
+  // Vehicle Chassis State
+  x: 0,
+  y: 1.5,
+  vx: 0,
+  vy: 0,
+  angle: 0,
+  vAngle: 0,
+  // Wheel States & Suspension Compression
+  rearWheelY: 0.92,
+  frontWheelY: 0.92,
+  rearComp: 0,
+  frontComp: 0,
+  wheelRot: 0,
+  rearGrounded: false,
+  frontGrounded: false,
+  // Driver Head/Neck Spring Physics
+  headAngle: 0,
+  headVel: 0,
+  // Economy, Fuel & Stunts
+  fuel: 100,
+  maxFuel: 100,
+  runCoins: 0,
+  distance: 0,
+  maxDistanceThisRun: 0,
+  airTime: 0,
+  airBonusStage: 0,
+  accumulatedFlipAngle: 0,
+  flipsCount: 0,
+  airBonusCount: 0,
+  // Analog Gauges
+  rpm: 0.1,
+  speedKmh: 0,
+  boostGauge: 0,
+  boostActiveTimer: 0,
+  // Controls
+  inputGas: false,
+  inputBrake: false,
+  // Spawned Collectibles & Particles
+  items: [],
+  nextSpawnX: 22,
+  particles: []
+};
+
+function createCoinMesh3D(value) {
+  const group = new THREE.Group();
+  const radius = value >= 500 ? 0.68 : value >= 100 ? 0.60 : 0.52;
+  const color = value >= 500 ? 0xf43f5e : value >= 100 ? 0x38bdf8 : 0xfacc15;
+  const geo = new THREE.CylinderGeometry(radius, radius, 0.20, 22);
+  geo.rotateX(Math.PI / 2);
+  const mat = new THREE.MeshStandardMaterial({
+    color,
+    metalness: 0.85,
+    roughness: 0.18,
+    emissive: color,
+    emissiveIntensity: 0.28
+  });
+  group.add(new THREE.Mesh(geo, mat));
+  return group;
+}
+
+function createFuelCanMesh3D() {
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.84, 1.08, 0.48),
+    new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.3 })
+  );
+  group.add(body);
+
+  const cross = new THREE.Mesh(
+    new THREE.BoxGeometry(0.52, 0.52, 0.52),
+    new THREE.MeshStandardMaterial({ color: 0xfef08a })
+  );
+  group.add(cross);
+
+  const handle = new THREE.Mesh(
+    new THREE.BoxGeometry(0.46, 0.16, 0.26),
+    new THREE.MeshStandardMaterial({ color: 0x991b1b })
+  );
+  handle.position.set(0, 0.62, 0);
+  group.add(handle);
+  return group;
+}
+
+function spawnItemsUpTo(targetX) {
+  const stageId = gameState.stageId;
+  while (gameState.nextSpawnX < targetX) {
+    const baseX = gameState.nextSpawnX;
+
+    const coinValues = [5, 25, 100, 500];
+    const baseVal = baseX > 450 ? 100 : baseX > 180 ? 25 : 5;
+    for (let i = 0; i < 5; i++) {
+      const cx = baseX + i * 2.4;
+      const cy = getTerrainHeight(cx, stageId) + 1.15 + Math.sin((i / 4) * Math.PI) * 0.55;
+      const val = i === 2 && baseX > 120 ? coinValues[Math.min(3, Math.floor(baseX / 220) + 1)] : baseVal;
+      const mesh = createCoinMesh3D(val);
+      mesh.position.set(cx, cy, 0);
+      pickupsGroup.add(mesh);
+      gameState.items.push({ type: 'coin', x: cx, y: cy, value: val, mesh, collected: false });
+    }
+
+    if (Math.floor(baseX / 90) !== Math.floor((baseX - 28) / 90)) {
+      const fx = baseX + 14;
+      const fy = getTerrainHeight(fx, stageId) + 1.08;
+      const fMesh = createFuelCanMesh3D();
+      fMesh.position.set(fx, fy, 0);
+      pickupsGroup.add(fMesh);
+      gameState.items.push({ type: 'fuel', x: fx, y: fy, value: 100, mesh: fMesh, collected: false });
+    }
+
+    gameState.nextSpawnX += 28;
+  }
+
+  for (let i = gameState.items.length - 1; i >= 0; i--) {
+    const it = gameState.items[i];
+    if (it.collected || it.x < gameState.x - 30) {
+      pickupsGroup.remove(it.mesh);
+      gameState.items.splice(i, 1);
+    }
+  }
+}
+
+function showFloatingPopup(text, colorClass = 'text-amber-300') {
+  const container = document.getElementById('popup-container');
+  const el = document.createElement('div');
+  el.className = `floating-popup font-black text-lg sm:text-2xl uppercase tracking-wider ${colorClass}`;
+  el.textContent = text;
+  container.appendChild(el);
+  setTimeout(() => {
+    if (el.parentNode) el.parentNode.removeChild(el);
+  }, 1350);
+}
+
+function resetRunState() {
+  while (pickupsGroup.children.length > 0) {
+    pickupsGroup.remove(pickupsGroup.children[0]);
+  }
+
+  const vehicleId = saveData.selectedVehicle;
+  const stageId = saveData.selectedStage;
+  const veh = VEHICLES[vehicleId];
+  activateVehicle3D(vehicleId);
+
+  const startY = getTerrainHeight(0, stageId);
+  const fuelLvl = saveData.upgrades.fuel4wd;
+
+  const diffCfg = DIFFICULTIES[saveData.selectedDifficulty] || DIFFICULTIES.easy;
+  gameState.mode = 'PLAYING';
+  gameState.difficulty = diffCfg.id;
+  gameState.gameMode = saveData.selectedGameMode || 'endless';
+  gameState.targetDist = diffCfg.targetDist;
+  gameState.challengeTimeLeft = diffCfg.timeLimit;
+  gameState.vehicleId = vehicleId;
+  gameState.stageId = stageId;
+  gameState.x = 0;
+  gameState.y = startY + veh.wheelRadius + veh.chassisClearance;
+  gameState.vx = 0;
+  gameState.vy = 0;
+  gameState.angle = 0;
+  gameState.vAngle = 0;
+  gameState.rearWheelY = startY + veh.wheelRadius;
+  gameState.frontWheelY = startY + veh.wheelRadius;
+  gameState.rearComp = 0;
+  gameState.frontComp = 0;
+  gameState.wheelRot = 0;
+  gameState.rearGrounded = true;
+  gameState.frontGrounded = true;
+  gameState.headAngle = 0;
+  gameState.headVel = 0;
+  gameState.maxFuel = 100 + (fuelLvl - 1) * 14;
+  gameState.fuel = gameState.maxFuel;
+  gameState.runCoins = 0;
+  gameState.distance = 0;
+  gameState.maxDistanceThisRun = 0;
+  gameState.airTime = 0;
+  gameState.airBonusStage = 0;
+  gameState.accumulatedFlipAngle = 0;
+  gameState.flipsCount = 0;
+  gameState.airBonusCount = 0;
+  gameState.rpm = 0.12;
+  gameState.speedKmh = 0;
+  gameState.boostGauge = 0;
+  gameState.boostActiveTimer = 0;
+  gameState.inputGas = false;
+  gameState.inputBrake = false;
+  gameState.items = [];
+  gameState.nextSpawnX = 20;
+  gameState.particles = [];
+
+  spawnItemsUpTo(120);
+  updateGameplayHUD();
+}
+
+function triggerGameOver(reasonTitle, reasonSubtitle, isNeckFlip = false) {
+  if (gameState.mode === 'GAMEOVER') return;
+  gameState.mode = 'GAMEOVER';
+  gameState.inputGas = false;
+  gameState.inputBrake = false;
+  updatePedalVisuals();
+  sfx.updateEngine(0, false);
+  sfx.playCrash();
+
+  if (isNeckFlip) {
+    const neckBonus = 150;
+    gameState.runCoins += neckBonus;
+    saveData.coins += neckBonus;
+    showFloatingPopup(`+NECK FLIP BONUS +${neckBonus}!`, 'text-red-400');
+  }
+
+  if (gameState.maxDistanceThisRun > (saveData.bestDistances[gameState.stageId] || 0)) {
+    saveData.bestDistances[gameState.stageId] = gameState.maxDistanceThisRun;
+  }
+  writeSaveData();
+
+  document.getElementById('gameover-title').textContent = reasonTitle;
+  document.getElementById('gameover-subtitle').textContent = reasonSubtitle;
+  document.getElementById('summary-distance').textContent = `${gameState.maxDistanceThisRun}m`;
+  document.getElementById('summary-best').textContent = `${saveData.bestDistances[gameState.stageId]}m`;
+  document.getElementById('summary-coins').textContent = `+${gameState.runCoins}`;
+  document.getElementById('summary-stunts').textContent = `${gameState.flipsCount} Flips / ${gameState.airBonusCount} Air`;
+
+  setTimeout(() => {
+    if (gameState.mode === 'GAMEOVER') {
+      document.getElementById('gameover-modal').classList.remove('hidden');
+    }
+  }, 650);
+}
+
+function stepPhysics(dt) {
+  if (gameState.mode !== 'PLAYING') return;
+
+  const st = STAGES[gameState.stageId];
+  const veh = VEHICLES[gameState.vehicleId];
+  const upg = saveData.upgrades;
+  const diffCfg = DIFFICULTIES[gameState.difficulty || saveData.selectedDifficulty] || DIFFICULTIES.easy;
+
+  const wbHalf = veh.wheelBaseHalf;
+  const wRadius = veh.wheelRadius;
+
+  // Derived Vehicle Upgrade Parameters scaled by Difficulty
+  const enginePower = (24 + (upg.engine - 1) * 3.1) * veh.torqueMult;
+  const maxSpeed = (23 + (upg.engine - 1) * 2.2) * veh.speedMult;
+  const springK = (74 + (upg.suspension - 1) * 7.8) * veh.springMult;
+  const damperC = (12.5 + (upg.suspension - 1) * 1.1) * veh.springMult;
+  const tireGrip = (1.0 + (upg.tires - 1) * 0.1) * st.baseTraction * veh.torqueMult * diffCfg.gripMult;
+  const awdBalance = 0.55 + (upg.fuel4wd - 1) * 0.05;
+
+  const hasFuel = gameState.fuel > 0;
+  const gasActive = gameState.inputGas && hasFuel;
+  const brakeActive = gameState.inputBrake;
+
+  // Fuel Drain scaled by Difficulty
+  const drainRate = (gasActive ? 3.8 : 1.15) * diffCfg.fuelDrainMult;
+  gameState.fuel = Math.max(0, gameState.fuel - drainRate * dt);
+
+  // Time Trial Challenge Mode Countdown & Target Check
+  if (gameState.gameMode === 'challenge') {
+    gameState.challengeTimeLeft = Math.max(0, gameState.challengeTimeLeft - dt);
+    if (gameState.distance >= gameState.targetDist) {
+      const winBonus = diffCfg.winBonus;
+      gameState.runCoins += winBonus;
+      saveData.coins += winBonus;
+      sfx.playStunt();
+      showFloatingPopup(`🏆 CHALLENGE WON! +${winBonus} COINS!`, 'text-emerald-300');
+      triggerGameOver(
+        `🏆 TIME TRIAL VICTORY (${diffCfg.label})!`,
+        `You crossed the ${gameState.targetDist}m finish line with ${gameState.challengeTimeLeft.toFixed(1)}s left! (+${winBonus} Bonus Coins)`,
+        false
+      );
+      return;
+    }
+    if (gameState.challengeTimeLeft <= 0) {
+      triggerGameOver(
+        '⏱ TIME UP! CHALLENGE FAILED!',
+        `You reached ${gameState.distance}m out of the ${gameState.targetDist}m target on ${diffCfg.label} difficulty.`,
+        false
+      );
+      return;
+    }
+  }
+
+  if (gasActive) {
+    gameState.rpm = Math.min(1.0, gameState.rpm + dt * 2.6);
+  } else {
+    gameState.rpm = Math.max(0.12, gameState.rpm - dt * 1.8);
+  }
+  sfx.updateEngine(gameState.rpm, hasFuel);
+
+  if (gameState.boostActiveTimer > 0) {
+    gameState.boostActiveTimer = Math.max(0, gameState.boostActiveTimer - dt);
+  }
+
+  // Gravity
+  gameState.vy -= st.gravity * dt;
+
+  // Compute Front & Rear Axle Positions
+  const cosA = Math.cos(gameState.angle);
+  const sinA = Math.sin(gameState.angle);
+
+  const rearAxleX = gameState.x - cosA * wbHalf;
+  const rearAxleRestY = gameState.y - sinA * wbHalf - veh.chassisClearance;
+
+  const frontAxleX = gameState.x + cosA * wbHalf;
+  const frontAxleRestY = gameState.y + sinA * wbHalf - veh.chassisClearance;
+
+  const groundRearY = getTerrainHeight(rearAxleX, gameState.stageId) + wRadius;
+  const groundFrontY = getTerrainHeight(frontAxleX, gameState.stageId) + wRadius;
+
+  const penRear = groundRearY - rearAxleRestY;
+  const penFront = groundFrontY - frontAxleRestY;
+
+  gameState.rearGrounded = penRear > -0.08;
+  gameState.frontGrounded = penFront > -0.08;
+
+  let totalUpForce = 0;
+  let suspensionTorque = 0;
+
+  // Rear Suspension Spring-Damper
+  if (penRear > 0) {
+    const clampedPen = Math.min(0.75, penRear);
+    const velAtRear = gameState.vy - gameState.vAngle * wbHalf * cosA;
+    const fRear = Math.max(0, clampedPen * springK - velAtRear * damperC);
+    totalUpForce += fRear;
+    suspensionTorque -= fRear * wbHalf * 0.42;
+    gameState.rearComp = clampedPen;
+    gameState.rearWheelY = groundRearY;
+  } else {
+    gameState.rearComp = Math.max(0, gameState.rearComp - dt * 4.0);
+    gameState.rearWheelY = rearAxleRestY;
+  }
+
+  // Front Suspension Spring-Damper
+  if (penFront > 0) {
+    const clampedPen = Math.min(0.75, penFront);
+    const velAtFront = gameState.vy + gameState.vAngle * wbHalf * cosA;
+    const fFront = Math.max(0, clampedPen * springK - velAtFront * damperC);
+    totalUpForce += fFront;
+    suspensionTorque += fFront * wbHalf * 0.42;
+    gameState.frontComp = clampedPen;
+    gameState.frontWheelY = groundFrontY;
+  } else {
+    gameState.frontComp = Math.max(0, gameState.frontComp - dt * 4.0);
+    gameState.frontWheelY = frontAxleRestY;
+  }
+
+  gameState.vy += totalUpForce * dt;
+  gameState.vAngle += suspensionTorque * dt;
+
+  const anyWheelGrounded = gameState.rearGrounded || gameState.frontGrounded;
+  const slope = getTerrainSlope(gameState.x, gameState.stageId);
+  const slopeAngle = Math.atan(slope);
+
+  if (anyWheelGrounded) {
+    // Check Smooth Landing for Supercharger Boost
+    if (gameState.airTime > 0.75 && Math.abs(gameState.angle - slopeAngle) < 0.45) {
+      gameState.boostGauge = Math.min(1, gameState.boostGauge + 0.45);
+      if (gameState.boostGauge >= 0.85) {
+        gameState.boostActiveTimer = 1.6;
+        gameState.boostGauge = 0;
+        showFloatingPopup('⚡ SUPERCHARGER BOOST!', 'text-sky-300');
+      }
+    }
+
+    // Check Full 360° Front/Back Flip upon landing on wheels
+    const totalFlips = Math.floor((Math.abs(gameState.accumulatedFlipAngle) + 0.85) / (Math.PI * 2));
+    if (totalFlips >= 1) {
+      const isBackflip = gameState.accumulatedFlipAngle > 0;
+      const bonus = totalFlips * 1000;
+      gameState.runCoins += bonus;
+      saveData.coins += bonus;
+      gameState.flipsCount += totalFlips;
+      sfx.playStunt();
+      showFloatingPopup(
+        `+${isBackflip ? 'BACK FLIP' : 'FRONT FLIP'} +${bonus}!`,
+        'text-emerald-300'
+      );
+    }
+
+    gameState.airTime = 0;
+    gameState.airBonusStage = 0;
+    gameState.accumulatedFlipAngle = 0;
+
+    // Balanced Hill Climb Rotational Physics:
+    // Natural suspension restoring force keeps the car drivable on flat/mild ground,
+    // while steep uphill acceleration or crest launches lift the front wheels smoothly!
+    const angleDiff = slopeAngle - gameState.angle;
+    if (gameState.rearGrounded && gameState.frontGrounded) {
+      gameState.vAngle += angleDiff * diffCfg.slopeAlignStiff * dt;
+      gameState.vAngle *= Math.pow(0.18, dt);
+    } else {
+      // On one wheel (wheelie or stoppie): natural gravity restoring pull unless player pushes past ~52 degrees
+      if (Math.abs(angleDiff) < 0.88) {
+        gameState.vAngle += angleDiff * (diffCfg.slopeAlignStiff * 0.45) * dt;
+      } else {
+        // Past the balance point (~52 deg), gravity pulls it into a flip unless corrected with Brake/Gas
+        gameState.vAngle += Math.sign(-angleDiff) * 3.2 * diffCfg.wheelieMult * dt;
+      }
+      gameState.vAngle *= Math.pow(0.32, dt);
+    }
+
+    // Drive Acceleration & Hill Gravity Component
+    const boostMult = gameState.boostActiveTimer > 0 ? 1.40 : 1.0;
+    const contactFactor = (gameState.rearGrounded && gameState.frontGrounded) ? 1.0 : awdBalance;
+
+    if (gasActive) {
+      const accel = enginePower * tireGrip * contactFactor * boostMult;
+      if (gameState.vx < maxSpeed * boostMult) {
+        gameState.vx += accel * Math.cos(slopeAngle) * dt;
+        gameState.vy += accel * Math.sin(slopeAngle) * 0.32 * dt;
+      }
+      // Controlled Wheelie Torque: gentle on flat ground, stronger on steep climbs!
+      const uphillBonus = Math.max(0, Math.sin(slopeAngle)) * 1.85;
+      gameState.vAngle += (2.8 + uphillBonus * 2.4) * diffCfg.wheelieMult * veh.airFlipMult * dt;
+
+      // Spawn Dirt/Gravel Kickup Particles right at Rear Tire Contact Patch
+      if (Math.random() < 0.7) {
+        gameState.particles.push({
+          type: 'dirt',
+          x: rearAxleX - 0.4,
+          y: groundRearY - wRadius + 0.08,
+          vx: -gameState.vx * 0.45 - Math.random() * 4,
+          vy: 2.0 + Math.random() * 3.5,
+          size: 3.5 + Math.random() * 4,
+          color: st.dustColor,
+          life: 0.45
+        });
+      }
+    } else if (brakeActive) {
+      if (gameState.vx > 0.5) {
+        gameState.vx -= 24 * tireGrip * dt;
+      } else {
+        gameState.vx -= enginePower * 0.62 * tireGrip * dt;
+      }
+      // Controlled Nose-Down Torque to smoothly bring down a wheelie or tilt forward
+      const downhillBonus = Math.max(0, -Math.sin(slopeAngle)) * 1.5;
+      gameState.vAngle -= (3.2 + downhillBonus * 2.0) * diffCfg.wheelieMult * veh.airFlipMult * dt;
+    }
+
+    gameState.vx -= Math.sin(slopeAngle) * (st.gravity * 0.62 / Math.max(0.85, tireGrip * 0.65)) * dt;
+    gameState.vx *= Math.pow(0.82, dt);
+
+    // Clamp chassis so wheels rest firmly on road surface
+    const minChassisY = getTerrainHeight(gameState.x, gameState.stageId) + wRadius + veh.chassisClearance * 0.72;
+    if (gameState.y < minChassisY) {
+      gameState.y = minChassisY;
+      if (gameState.vy < 0) gameState.vy = 0;
+    }
+  } else {
+    // AIRBORNE STATE
+    gameState.airTime += dt;
+    gameState.accumulatedFlipAngle += gameState.vAngle * dt;
+
+    if (gameState.airTime >= 1.5 + gameState.airBonusStage * 1.0) {
+      gameState.airBonusStage++;
+      const airAwards = [100, 250, 500, 1000];
+      const reward = airAwards[Math.min(airAwards.length - 1, gameState.airBonusStage - 1)];
+      gameState.runCoins += reward;
+      saveData.coins += reward;
+      gameState.airBonusCount++;
+      sfx.playStunt();
+      showFloatingPopup(`+AIR TIME BONUS +${reward}!`, 'text-sky-300');
+    }
+
+    if (gasActive) {
+      gameState.vAngle += 6.8 * diffCfg.airRotMult * veh.airFlipMult * dt;
+    }
+    if (brakeActive) {
+      gameState.vAngle -= 6.8 * diffCfg.airRotMult * veh.airFlipMult * dt;
+    }
+    gameState.vAngle *= Math.pow(0.68, dt);
+    gameState.vx *= Math.pow(0.97, dt);
+  }
+
+  // Exhaust Smoke Particles
+  if (gasActive && Math.random() < 0.45) {
+    gameState.particles.push({
+      type: 'smoke',
+      x: gameState.x - cosA * 2.65,
+      y: gameState.y - sinA * 2.65 + 0.15,
+      vx: -2 - Math.random() * 2,
+      vy: 0.8 + Math.random() * 1.4,
+      size: 5 + Math.random() * 5,
+      color: 'rgba(203, 213, 225, 0.45)',
+      life: 0.5
+    });
+  }
+
+  // Integrate Position & Rotation
+  gameState.x = Math.max(-8, gameState.x + gameState.vx * dt);
+  gameState.y += gameState.vy * dt;
+  gameState.angle += gameState.vAngle * dt;
+
+  // Wheel Spin Velocity
+  const spinSpeed = gasActive ? Math.max(gameState.vx, 12) : gameState.vx;
+  gameState.wheelRot -= (spinSpeed / wRadius) * dt;
+
+  // Driver Head/Neck Spring Physics
+  const targetHeadAngle = THREE.MathUtils.clamp(-gameState.vx * 0.025 - gameState.vAngle * 0.18, -0.55, 0.55);
+  const headSpringForce = (targetHeadAngle - gameState.headAngle) * 45 - gameState.headVel * 6.5;
+  gameState.headVel += headSpringForce * dt;
+  gameState.headAngle += gameState.headVel * dt;
+
+  // Roof / Driver Head Terrain Impact Detection ("DRIVER DOWN / NECK FLIP")
+  const roofWorldX = gameState.x - Math.sin(gameState.angle) * 1.55;
+  const roofWorldY = gameState.y + Math.cos(gameState.angle) * 1.55;
+  const terrainAtRoof = getTerrainHeight(roofWorldX, gameState.stageId);
+  const cosUpsideDown = Math.cos(gameState.angle);
+
+  if (cosUpsideDown < -0.35 && roofWorldY <= terrainAtRoof + 0.52) {
+    triggerGameOver(
+      'DRIVER DOWN / NECK FLIP!',
+      `Your ${veh.name} flipped upside down and impacted the road!`,
+      true
+    );
+    return;
+  }
+
+  gameState.distance = Math.max(0, Math.floor(gameState.x));
+  if (gameState.distance > gameState.maxDistanceThisRun) {
+    gameState.maxDistanceThisRun = gameState.distance;
+  }
+  gameState.speedKmh = Math.round(Math.abs(gameState.vx) * 4.2);
+
+  // Check Collectibles
+  for (let i = 0; i < gameState.items.length; i++) {
+    const it = gameState.items[i];
+    if (it.collected) continue;
+    const dx = it.x - gameState.x;
+    const dy = it.y - gameState.y;
+    if (dx * dx + dy * dy < 6.4) {
+      it.collected = true;
+      pickupsGroup.remove(it.mesh);
+      if (it.type === 'coin') {
+        const gained = Math.round(it.value * diffCfg.coinMult);
+        gameState.runCoins += gained;
+        saveData.coins += gained;
+        sfx.playCoin();
+        if (gained >= 100) {
+          showFloatingPopup(`+${gained} COINS!`, 'text-amber-300');
+        }
+      } else if (it.type === 'fuel') {
+        gameState.fuel = gameState.maxFuel;
+        sfx.playFuel();
+        showFloatingPopup('⛽ FUEL REFILLED 100%!', 'text-emerald-400');
+      }
+    } else {
+      it.mesh.rotation.y += dt * 2.8;
+    }
+  }
+
+  spawnItemsUpTo(gameState.x + 95);
+
+  if (gameState.fuel <= 0 && Math.abs(gameState.vx) < 0.45 && anyWheelGrounded) {
+    triggerGameOver(
+      'OUT OF FUEL!',
+      `Your ${veh.name} ran dry before reaching the next jerrycan!`,
+      false
+    );
+  }
+
+  for (let i = gameState.particles.length - 1; i >= 0; i--) {
+    const p = gameState.particles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    if (p.type === 'dirt') p.vy -= 14 * dt;
+    p.life -= dt;
+    if (p.life <= 0) gameState.particles.splice(i, 1);
+  }
+}
+
+/* ============================================================================
+   7. RENDER PIPELINE (SEAMLESS MIRROR-TILED PARALLAX, 3D CAR, HIGH-CONTRAST ROAD)
+============================================================================ */
+function drawParallaxBackground() {
+  const w = bgCanvas.width;
+  const h = bgCanvas.height;
+  const st = STAGES[gameState.stageId];
+
+  // 1. Sky Gradient Base
+  const skyGrad = bgCtx.createLinearGradient(0, 0, 0, h);
+  skyGrad.addColorStop(0, st.skyTop);
+  skyGrad.addColorStop(1, st.skyBottom);
+  bgCtx.fillStyle = skyGrad;
+  bgCtx.fillRect(0, 0, w, h);
+
+  // 2. Seamless Mirror-Tiled Background Image (Eliminates vertical tile seam in sky!)
+  const bgImg = bgImages[gameState.stageId];
+  if (bgImg && bgImg.complete && bgImg.naturalWidth > 0) {
+    const imgAspect = bgImg.naturalWidth / bgImg.naturalHeight;
+    const drawH = h * 0.94;
+    const drawW = Math.max(w * 0.75, drawH * imgAspect);
+    const rawScroll = gameState.x * 9;
+    const tileIdxStart = Math.floor(rawScroll / drawW) - 1;
+
+    bgCtx.save();
+    bgCtx.globalAlpha = 0.88;
+    for (let t = tileIdxStart; t <= tileIdxStart + 3; t++) {
+      const screenX = t * drawW - rawScroll;
+      const isMirrored = Math.abs(t) % 2 === 1;
+      bgCtx.save();
+      if (isMirrored) {
+        bgCtx.translate(screenX + drawW, 0);
+        bgCtx.scale(-1, 1);
+        bgCtx.drawImage(bgImg, 0, 0, drawW + 2, drawH);
+      } else {
+        bgCtx.drawImage(bgImg, screenX, 0, drawW + 2, drawH);
+      }
+      bgCtx.restore();
+    }
+
+    // Soft atmospheric mist separating distant mountain photo from foreground road
+    const mistGrad = bgCtx.createLinearGradient(0, h * 0.42, 0, h);
+    mistGrad.addColorStop(0, 'rgba(15, 23, 42, 0)');
+    mistGrad.addColorStop(0.65, 'rgba(15, 23, 42, 0.32)');
+    mistGrad.addColorStop(1, 'rgba(9, 13, 22, 0.78)');
+    bgCtx.fillStyle = mistGrad;
+    bgCtx.fillRect(0, 0, w, h);
+    bgCtx.restore();
+  } else {
+    // Stage 3: Stormy Green Downs Procedural Moody Clouds & Distant Hills
+    bgCtx.save();
+    const cloudScroll = (gameState.x * 8) % w;
+    bgCtx.fillStyle = 'rgba(30, 41, 59, 0.55)';
+    for (let i = -1; i <= 3; i++) {
+      const cx = i * (w * 0.45) - (cloudScroll * 0.4);
+      bgCtx.beginPath();
+      bgCtx.ellipse(cx, h * 0.22, w * 0.28, h * 0.09, 0, 0, Math.PI * 2);
+      bgCtx.fill();
+    }
+    bgCtx.restore();
+  }
+}
+
+function syncThreeScene() {
+  const veh = VEHICLES[gameState.vehicleId];
+  const wbHalf = veh.wheelBaseHalf;
+  const variant = garage3D.variants[gameState.vehicleId];
+
+  // Position Vehicle Root
+  garage3D.root.position.set(gameState.x, gameState.y, 0);
+  garage3D.root.rotation.z = gameState.angle;
+
+  // Subtle 3D showroom yaw so hood, grille, and fastback depth are visible without detaching wheels from ground
+  variant.chassis.rotation.y = -0.07;
+  variant.headPivot.rotation.z = gameState.headAngle;
+
+  // Position Independent Front & Rear Wheels in Car Local Space
+  const rearLocalY = -veh.chassisClearance + gameState.rearComp * 0.58;
+  const frontLocalY = -veh.chassisClearance + gameState.frontComp * 0.58;
+
+  variant.wRear.position.set(-wbHalf, rearLocalY, 0.12);
+  variant.wFront.position.set(wbHalf, frontLocalY, 0.12);
+
+  variant.wRear.rotation.z = gameState.wheelRot;
+  variant.wFront.rotation.z = gameState.wheelRot;
+
+  // Position Visible Yellow Coilover Struts
+  rearStrutMesh.position.set(-wbHalf, rearLocalY + 0.48, 0);
+  frontStrutMesh.position.set(wbHalf, frontLocalY + 0.48, 0);
+
+  // Camera smoothly tracks vehicle
+  const camTargetX = gameState.x + 4.8 + Math.min(4.0, gameState.vx * 0.14);
+  const camTargetY = gameState.y + 1.25;
+  camera.position.x += (camTargetX - camera.position.x) * 0.16;
+  camera.position.y += (camTargetY - camera.position.y) * 0.14;
+  camera.lookAt(gameState.x + 4.8, gameState.y + 0.4, 0);
+
+  renderer.render(scene, camera);
+}
+
+// Project exact 3D world coordinates (at Z = 0, the exact plane of the tires!) to 2D Canvas pixels
+function worldToScreenZ0(wx, wy) {
+  const vec = new THREE.Vector3(wx, wy, 0);
+  vec.project(camera);
+  return {
+    x: (vec.x * 0.5 + 0.5) * hudCanvas.width,
+    y: (-vec.y * 0.5 + 0.5) * hudCanvas.height
+  };
+}
+
+// Draw High-Contrast Multi-Layered Hill Climb Road & Earth Cross-Section + Tire Contact Shadow
+function drawHighContrastRoadAndShadows() {
+  const w = hudCanvas.width;
+  const h = hudCanvas.height;
+  const st = STAGES[gameState.stageId];
+  const veh = VEHICLES[gameState.vehicleId];
+
+  const startX = gameState.x - 18;
+  const endX = gameState.x + 36;
+  const step = 0.45;
+
+  const pts = [];
+  for (let wx = startX; wx <= endX; wx += step) {
+    const wy = getTerrainHeight(wx, gameState.stageId);
+    const sp = worldToScreenZ0(wx, wy);
+    pts.push({ wx, wy, x: sp.x, y: sp.y });
+  }
+  if (pts.length < 2) return;
+
+  hudCtx.save();
+
+  // 1. Deep Bedrock & Sub-Soil Cross-Section Body (Distinct dark earth/rock color)
+  const earthGrad = hudCtx.createLinearGradient(0, h * 0.45, 0, h);
+  earthGrad.addColorStop(0, st.subSoilColor);
+  earthGrad.addColorStop(0.35, st.subRockColor);
+  earthGrad.addColorStop(1, '#05070b');
+
+  hudCtx.beginPath();
+  hudCtx.moveTo(pts[0].x, pts[0].y + 14);
+  for (let i = 1; i < pts.length; i++) {
+    hudCtx.lineTo(pts[i].x, pts[i].y + 14);
+  }
+  hudCtx.lineTo(pts[pts.length - 1].x, h + 60);
+  hudCtx.lineTo(pts[0].x, h + 60);
+  hudCtx.closePath();
+  hudCtx.fillStyle = earthGrad;
+  hudCtx.fill();
+
+  // 2. Geological Rock Strata Striations inside the cross-section
+  hudCtx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+  hudCtx.lineWidth = 3;
+  for (let layerOffset = 42; layerOffset <= 150; layerOffset += 36) {
+    hudCtx.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      const sy = pts[i].y + layerOffset + Math.sin(pts[i].wx * 0.5) * 6;
+      if (i === 0) hudCtx.moveTo(pts[i].x, sy);
+      else hudCtx.lineTo(pts[i].x, sy);
+    }
+    hudCtx.stroke();
+  }
+
+  // 3. Roadside Grass / Terracotta Shoulder Curb Band (14px below asphalt)
+  hudCtx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    if (i === 0) hudCtx.moveTo(pts[i].x, pts[i].y + 13);
+    else hudCtx.lineTo(pts[i].x, pts[i].y + 13);
+  }
+  hudCtx.lineWidth = 10;
+  hudCtx.strokeStyle = st.curbShoulder;
+  hudCtx.lineCap = 'round';
+  hudCtx.lineJoin = 'round';
+  hudCtx.stroke();
+
+  // 4. Primary High-Contrast Asphalt / Compacted Trail Surface (Exact tire contact line!)
+  hudCtx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    if (i === 0) hudCtx.moveTo(pts[i].x, pts[i].y + 4);
+    else hudCtx.lineTo(pts[i].x, pts[i].y + 4);
+  }
+  hudCtx.lineWidth = 12;
+  hudCtx.strokeStyle = st.asphaltTop;
+  hudCtx.stroke();
+
+  // 5. Crisp Top Road Edge Highlight & Dashed Highway Safety Line
+  hudCtx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    if (i === 0) hudCtx.moveTo(pts[i].x, pts[i].y - 1);
+    else hudCtx.lineTo(pts[i].x, pts[i].y - 1);
+  }
+  hudCtx.lineWidth = 2.5;
+  hudCtx.strokeStyle = '#94a3b8';
+  hudCtx.stroke();
+
+  hudCtx.save();
+  hudCtx.setLineDash([16, 14]);
+  hudCtx.lineDashOffset = -(gameState.x * 28);
+  hudCtx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    if (i === 0) hudCtx.moveTo(pts[i].x, pts[i].y + 5);
+    else hudCtx.lineTo(pts[i].x, pts[i].y + 5);
+  }
+  hudCtx.lineWidth = 3;
+  hudCtx.strokeStyle = st.asphaltStripe;
+  hudCtx.stroke();
+  hudCtx.restore();
+
+  // 6. Grounded Under-Car & Tire Contact Shadows (Anchors the car onto the road!)
+  const rearTireX = gameState.x - Math.cos(gameState.angle) * veh.wheelBaseHalf;
+  const frontTireX = gameState.x + Math.cos(gameState.angle) * veh.wheelBaseHalf;
+  const rearGroundY = getTerrainHeight(rearTireX, gameState.stageId);
+  const frontGroundY = getTerrainHeight(frontTireX, gameState.stageId);
+  const centerGroundY = getTerrainHeight(gameState.x, gameState.stageId);
+
+  const heightAboveGround = Math.max(0, gameState.y - veh.wheelRadius - centerGroundY);
+  const shadowAlpha = Math.max(0.15, 0.75 - heightAboveGround * 0.12);
+
+  const pRear = worldToScreenZ0(rearTireX, rearGroundY);
+  const pFront = worldToScreenZ0(frontTireX, frontGroundY);
+  const pCenter = worldToScreenZ0(gameState.x, centerGroundY);
+
+  // Chassis Drop Shadow along road surface
+  hudCtx.save();
+  hudCtx.translate(pCenter.x, pCenter.y + 2);
+  hudCtx.rotate(-Math.atan(getTerrainSlope(gameState.x, gameState.stageId)));
+  const shadowW = Math.max(60, Math.hypot(pFront.x - pRear.x, pFront.y - pRear.y) * 1.32);
+  const shadGrad = hudCtx.createRadialGradient(0, 0, 6, 0, 0, shadowW * 0.6);
+  shadGrad.addColorStop(0, `rgba(0, 0, 0, ${shadowAlpha})`);
+  shadGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  hudCtx.fillStyle = shadGrad;
+  hudCtx.beginPath();
+  hudCtx.ellipse(0, 0, shadowW * 0.62, 11, 0, 0, Math.PI * 2);
+  hudCtx.fill();
+  hudCtx.restore();
+
+  // Tire Contact Patch Shadows
+  if (gameState.rearGrounded) {
+    hudCtx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    hudCtx.beginPath();
+    hudCtx.ellipse(pRear.x, pRear.y + 1, 22, 6, 0, 0, Math.PI * 2);
+    hudCtx.fill();
+  }
+  if (gameState.frontGrounded) {
+    hudCtx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    hudCtx.beginPath();
+    hudCtx.ellipse(pFront.x, pFront.y + 1, 22, 6, 0, 0, Math.PI * 2);
+    hudCtx.fill();
+  }
+
+  hudCtx.restore();
+}
+
+function drawAnalogGauge(cx, cy, radius, title, unit, valueNormalized, displayValue, maxTicks, redlineStart = 0.78) {
+  hudCtx.save();
+
+  hudCtx.beginPath();
+  hudCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+  hudCtx.fillStyle = 'rgba(9, 13, 22, 0.90)';
+  hudCtx.fill();
+  hudCtx.lineWidth = 3.5;
+  hudCtx.strokeStyle = '#475569';
+  hudCtx.stroke();
+
+  hudCtx.beginPath();
+  hudCtx.arc(cx, cy, radius - 5, 0, Math.PI * 2);
+  hudCtx.strokeStyle = 'rgba(148, 163, 184, 0.25)';
+  hudCtx.lineWidth = 1.5;
+  hudCtx.stroke();
+
+  const startAng = Math.PI * 0.78;
+  const endAng = Math.PI * 2.22;
+  const sweep = endAng - startAng;
+
+  hudCtx.beginPath();
+  hudCtx.arc(cx, cy, radius - 10, startAng + sweep * redlineStart, endAng);
+  hudCtx.strokeStyle = '#ef4444';
+  hudCtx.lineWidth = 5;
+  hudCtx.stroke();
+
+  for (let i = 0; i <= maxTicks; i++) {
+    const frac = i / maxTicks;
+    const ang = startAng + frac * sweep;
+    const rIn = radius - 16;
+    const rOut = radius - 7;
+    hudCtx.beginPath();
+    hudCtx.moveTo(cx + Math.cos(ang) * rIn, cy + Math.sin(ang) * rIn);
+    hudCtx.lineTo(cx + Math.cos(ang) * rOut, cy + Math.sin(ang) * rOut);
+    hudCtx.strokeStyle = frac >= redlineStart ? '#f87171' : '#e2e8f0';
+    hudCtx.lineWidth = i % 2 === 0 ? 2.2 : 1.2;
+    hudCtx.stroke();
+  }
+
+  hudCtx.fillStyle = '#94a3b8';
+  hudCtx.font = '800 10px Inter, sans-serif';
+  hudCtx.textAlign = 'center';
+  hudCtx.fillText(title, cx, cy - radius * 0.34);
+
+  hudCtx.fillStyle = '#ffffff';
+  hudCtx.font = '900 15px Inter, sans-serif';
+  hudCtx.fillText(displayValue, cx, cy + radius * 0.56);
+
+  hudCtx.fillStyle = '#38bdf8';
+  hudCtx.font = '700 9px Inter, sans-serif';
+  hudCtx.fillText(unit, cx, cy + radius * 0.76);
+
+  const needleAng = startAng + Math.min(1, Math.max(0, valueNormalized)) * sweep;
+  hudCtx.save();
+  hudCtx.translate(cx, cy);
+  hudCtx.rotate(needleAng);
+  hudCtx.beginPath();
+  hudCtx.moveTo(-10, -2.5);
+  hudCtx.lineTo(radius - 12, 0);
+  hudCtx.lineTo(-10, 2.5);
+  hudCtx.closePath();
+  hudCtx.fillStyle = '#ef4444';
+  hudCtx.fill();
+  hudCtx.restore();
+
+  hudCtx.beginPath();
+  hudCtx.arc(cx, cy, 6.5, 0, Math.PI * 2);
+  hudCtx.fillStyle = '#e2e8f0';
+  hudCtx.fill();
+
+  hudCtx.restore();
+}
+
+function drawHudCanvasOverlay() {
+  const w = hudCanvas.width;
+  const h = hudCanvas.height;
+  hudCtx.clearRect(0, 0, w, h);
+
+  // 1. Draw High-Contrast Asphalt/Rock Road Cross-Section & Ground Contact Shadows
+  drawHighContrastRoadAndShadows();
+
+  // 1b. Draw Challenge Finish Arch if in Time Trial Challenge Mode
+  if (gameState.gameMode === 'challenge' && gameState.targetDist) {
+    const finX = gameState.targetDist;
+    if (finX >= gameState.x - 20 && finX <= gameState.x + 45) {
+      const finY = getTerrainHeight(finX, gameState.stageId);
+      const fp = worldToScreenZ0(finX, finY);
+      hudCtx.save();
+      hudCtx.fillStyle = '#e11d48';
+      hudCtx.fillRect(fp.x - 4, fp.y - 95, 8, 95);
+      hudCtx.fillStyle = '#10b981';
+      hudCtx.strokeStyle = '#ffffff';
+      hudCtx.lineWidth = 2.5;
+      hudCtx.beginPath();
+      hudCtx.roundRect(fp.x - 46, fp.y - 122, 92, 30, 6);
+      hudCtx.fill();
+      hudCtx.stroke();
+      hudCtx.fillStyle = '#ffffff';
+      hudCtx.font = '900 12px Inter, sans-serif';
+      hudCtx.textAlign = 'center';
+      hudCtx.fillText(`🏁 FINISH ${finX}m`, fp.x, fp.y - 103);
+      hudCtx.restore();
+    }
+  }
+
+  // 2. Draw 100m Distance Signposts Anchored Directly to the Road Surface
+  const firstSign = Math.max(100, Math.floor((gameState.x - 25) / 100) * 100);
+  for (let m = firstSign; m <= gameState.x + 45; m += 100) {
+    const sy = getTerrainHeight(m, gameState.stageId);
+    const screenPt = worldToScreenZ0(m, sy);
+    if (screenPt.x >= -60 && screenPt.x <= w + 60) {
+      hudCtx.save();
+      hudCtx.fillStyle = '#78350f';
+      hudCtx.fillRect(screenPt.x - 3, screenPt.y - 46, 6, 48);
+      hudCtx.fillStyle = '#facc15';
+      hudCtx.strokeStyle = '#0f172a';
+      hudCtx.lineWidth = 2.5;
+      hudCtx.beginPath();
+      hudCtx.roundRect(screenPt.x - 28, screenPt.y - 68, 56, 24, 5);
+      hudCtx.fill();
+      hudCtx.stroke();
+      hudCtx.fillStyle = '#0f172a';
+      hudCtx.font = '900 12px Inter, sans-serif';
+      hudCtx.textAlign = 'center';
+      hudCtx.fillText(`${m}m`, screenPt.x, screenPt.y - 52);
+      hudCtx.restore();
+    }
+  }
+
+  // 3. Draw Dirt & Smoke Particles
+  gameState.particles.forEach(p => {
+    const pt = worldToScreenZ0(p.x, p.y);
+    hudCtx.save();
+    hudCtx.globalAlpha = Math.max(0, p.life * 1.6);
+    hudCtx.fillStyle = p.color;
+    hudCtx.beginPath();
+    hudCtx.arc(pt.x, pt.y, p.size, 0, Math.PI * 2);
+    hudCtx.fill();
+    hudCtx.restore();
+  });
+
+  // 4. Draw Bottom-Center Analog RPM, Speedometer & Boost Gauge during gameplay
+  if (gameState.mode === 'PLAYING') {
+    const isCompact = w < 640;
+    const dialRadius = isCompact ? 38 : 54;
+    const centerY = h - (isCompact ? 48 : 66);
+    const centerX = w * 0.5;
+
+    drawAnalogGauge(
+      centerX - (isCompact ? 56 : 82),
+      centerY,
+      dialRadius,
+      'RPM',
+      'x1000',
+      gameState.rpm,
+      (gameState.rpm * 8).toFixed(1),
+      8,
+      0.75
+    );
+
+    drawAnalogGauge(
+      centerX + (isCompact ? 56 : 82),
+      centerY,
+      dialRadius,
+      'SPEED',
+      'KM/H',
+      Math.min(1, gameState.speedKmh / 140),
+      `${gameState.speedKmh}`,
+      10,
+      0.82
+    );
+
+    const boostR = isCompact ? 22 : 28;
+    const boostY = centerY - (isCompact ? 28 : 38);
+    const boostVal = gameState.boostActiveTimer > 0 ? 1.0 : gameState.boostGauge;
+    hudCtx.save();
+    hudCtx.beginPath();
+    hudCtx.arc(centerX, boostY, boostR, 0, Math.PI * 2);
+    hudCtx.fillStyle = '#090d16';
+    hudCtx.fill();
+    hudCtx.lineWidth = 2.5;
+    hudCtx.strokeStyle = gameState.boostActiveTimer > 0 ? '#38bdf8' : '#64748b';
+    hudCtx.stroke();
+
+    hudCtx.beginPath();
+    hudCtx.arc(centerX, boostY, boostR - 4, Math.PI * 0.8, Math.PI * 0.8 + boostVal * Math.PI * 1.4);
+    hudCtx.strokeStyle = gameState.boostActiveTimer > 0 ? '#22d3ee' : '#f59e0b';
+    hudCtx.lineWidth = 4;
+    hudCtx.stroke();
+
+    hudCtx.fillStyle = '#e2e8f0';
+    hudCtx.font = '800 8px Inter, sans-serif';
+    hudCtx.textAlign = 'center';
+    hudCtx.fillText('BOOST', centerX, boostY + 3);
+    hudCtx.restore();
+  }
+}
+
+/* ============================================================================
+   8. UI & GARAGE MENU CONTROLLERS
+============================================================================ */
+function updateGameplayHUD() {
+  const pct = Math.max(0, Math.min(100, Math.round((gameState.fuel / gameState.maxFuel) * 100)));
+  const fillEl = document.getElementById('fuel-bar-fill');
+  const pctEl = document.getElementById('fuel-pct-label');
+  const lowBanner = document.getElementById('low-fuel-banner');
+  const alarmIcon = document.getElementById('fuel-alarm-icon');
+
+  fillEl.style.width = `${pct}%`;
+  pctEl.textContent = `${pct}%`;
+
+  if (pct < 25) {
+    pctEl.className = 'text-red-400 font-black';
+    lowBanner.classList.remove('hidden');
+    alarmIcon.classList.add('low-fuel-flash');
+  } else {
+    pctEl.className = 'text-emerald-400';
+    lowBanner.classList.add('hidden');
+    alarmIcon.classList.remove('low-fuel-flash');
+  }
+
+  const wheelieBanner = document.getElementById('wheelie-danger-banner');
+  if (wheelieBanner) {
+    const normAng = Math.atan2(Math.sin(gameState.angle), Math.cos(gameState.angle));
+    if (Math.abs(normAng) > 0.78 && gameState.mode === 'PLAYING') {
+      wheelieBanner.classList.remove('hidden');
+    } else {
+      wheelieBanner.classList.add('hidden');
+    }
+  }
+
+  document.getElementById('hud-coins').textContent = saveData.coins.toLocaleString();
+  document.getElementById('hud-distance').textContent = gameState.distance;
+  const currentBest = Math.max(gameState.maxDistanceThisRun, saveData.bestDistances[gameState.stageId] || 0);
+  document.getElementById('hud-best-distance').textContent = currentBest;
+  const diffCfg = DIFFICULTIES[gameState.difficulty || saveData.selectedDifficulty] || DIFFICULTIES.easy;
+  const gMode = GAME_MODES[gameState.gameMode || saveData.selectedGameMode] || GAME_MODES.endless;
+  document.getElementById('hud-stage-name').textContent = STAGES[gameState.stageId].badge;
+  document.getElementById('hud-diff-mode-badge').textContent = `${diffCfg.label} • ${gMode.shortLabel}`;
+  document.getElementById('hud-car-name').textContent = VEHICLES[gameState.vehicleId].shortName;
+  document.getElementById('hud-flips').textContent = gameState.flipsCount;
+  document.getElementById('hud-air-count').textContent = gameState.airBonusCount;
+
+  const chalBox = document.getElementById('hud-challenge-box');
+  if ((gameState.gameMode || saveData.selectedGameMode) === 'challenge') {
+    chalBox.classList.remove('hidden');
+    document.getElementById('hud-challenge-goal').textContent = `🏁 GOAL: ${gameState.distance}/${gameState.targetDist || diffCfg.targetDist}m`;
+    const tLeft = typeof gameState.challengeTimeLeft === 'number' ? gameState.challengeTimeLeft : diffCfg.timeLimit;
+    document.getElementById('hud-challenge-timer').textContent = `⏱ ${tLeft.toFixed(1)}s`;
+  } else {
+    chalBox.classList.add('hidden');
+  }
+}
+
+function renderMenuUI() {
+  document.getElementById('menu-total-coins').textContent = saveData.coins.toLocaleString();
+
+  // Difficulty Buttons State
+  const activeDiff = DIFFICULTIES[saveData.selectedDifficulty] || DIFFICULTIES.easy;
+  document.getElementById('diff-desc-label').textContent = activeDiff.desc;
+  ['easy', 'medium', 'hard'].forEach(dKey => {
+    const btn = document.getElementById(`diff-btn-${dKey}`);
+    if (!btn) return;
+    const isSel = saveData.selectedDifficulty === dKey;
+    if (dKey === 'easy') {
+      btn.className = isSel
+        ? 'py-2 px-3 rounded-xl border-2 border-emerald-400 bg-emerald-500/25 text-white font-black text-xs uppercase tracking-wider transition flex flex-col items-center ring-2 ring-emerald-500/30'
+        : 'py-2 px-3 rounded-xl border-2 border-slate-800 bg-slate-900/90 text-slate-300 font-black text-xs uppercase tracking-wider transition flex flex-col items-center hover:border-slate-700';
+    } else if (dKey === 'medium') {
+      btn.className = isSel
+        ? 'py-2 px-3 rounded-xl border-2 border-amber-400 bg-amber-500/25 text-white font-black text-xs uppercase tracking-wider transition flex flex-col items-center ring-2 ring-amber-500/30'
+        : 'py-2 px-3 rounded-xl border-2 border-slate-800 bg-slate-900/90 text-slate-300 font-black text-xs uppercase tracking-wider transition flex flex-col items-center hover:border-slate-700';
+    } else {
+      btn.className = isSel
+        ? 'py-2 px-3 rounded-xl border-2 border-rose-500 bg-rose-500/25 text-white font-black text-xs uppercase tracking-wider transition flex flex-col items-center ring-2 ring-rose-500/30'
+        : 'py-2 px-3 rounded-xl border-2 border-slate-800 bg-slate-900/90 text-slate-300 font-black text-xs uppercase tracking-wider transition flex flex-col items-center hover:border-slate-700';
+    }
+  });
+
+  // 2 Game Modes Buttons State
+  const activeMode = GAME_MODES[saveData.selectedGameMode] || GAME_MODES.endless;
+  document.getElementById('gamemode-desc-label').textContent = activeMode.id === 'challenge'
+    ? `Goal: Reach ${activeDiff.targetDist}m in ${activeDiff.timeLimit}s (+₵${activeDiff.winBonus} Bonus)`
+    : activeMode.desc;
+  ['endless', 'challenge'].forEach(mKey => {
+    const btn = document.getElementById(`gmode-btn-${mKey}`);
+    if (!btn) return;
+    const isSel = saveData.selectedGameMode === mKey;
+    btn.className = isSel
+      ? 'py-2 px-3 rounded-xl border-2 border-sky-400 bg-sky-500/25 text-white font-black text-xs uppercase tracking-wider transition flex flex-col items-center ring-2 ring-sky-500/30'
+      : 'py-2 px-3 rounded-xl border-2 border-slate-800 bg-slate-900/90 text-slate-300 font-black text-xs uppercase tracking-wider transition flex flex-col items-center hover:border-slate-700';
+  });
+
+  // Vehicle Selection Cards
+  VEHICLES.forEach(veh => {
+    const card = document.getElementById(`vehicle-card-${veh.id}`);
+    const badge = document.getElementById(`vehicle-badge-${veh.id}`);
+    if (saveData.selectedVehicle === veh.id) {
+      card.classList.remove('border-slate-800');
+      card.classList.add('border-red-500', 'ring-2', 'ring-red-500/40');
+      badge.classList.remove('hidden');
+    } else {
+      card.classList.remove('border-red-500', 'ring-2', 'ring-red-500/40');
+      card.classList.add('border-slate-800');
+      badge.classList.add('hidden');
+    }
+  });
+
+  // Stage Cards & Best Records
+  STAGES.forEach(st => {
+    const card = document.getElementById(`stage-card-${st.id}`);
+    const badge = document.getElementById(`stage-badge-${st.id}`);
+    const bestEl = document.getElementById(`stage-best-${st.id}`);
+    bestEl.textContent = `${saveData.bestDistances[st.id] || 0}m`;
+
+    if (saveData.selectedStage === st.id) {
+      card.classList.remove('border-slate-800');
+      card.classList.add('border-red-500', 'ring-2', 'ring-red-500/40');
+      badge.classList.remove('hidden');
+    } else {
+      card.classList.remove('border-red-500', 'ring-2', 'ring-red-500/40');
+      card.classList.add('border-slate-800');
+      badge.classList.add('hidden');
+    }
+  });
+
+  // 4-Part Upgrade Cards
+  const parts = ['engine', 'suspension', 'tires', 'fuel4wd'];
+  parts.forEach(part => {
+    const lvl = saveData.upgrades[part];
+    document.getElementById(`upg-lvl-${part}`).textContent = `LVL ${lvl} / 10`;
+
+    const barsContainer = document.getElementById(`upg-bars-${part}`);
+    barsContainer.innerHTML = '';
+    for (let i = 1; i <= 10; i++) {
+      const bar = document.createElement('div');
+      bar.className = `h-2 rounded-sm ${i <= lvl ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50' : 'bg-slate-800'}`;
+      barsContainer.appendChild(bar);
+    }
+
+    const btn = document.getElementById(`btn-upg-${part}`);
+    if (lvl >= 10) {
+      btn.textContent = 'MAX LEVEL (10/10)';
+      btn.disabled = true;
+      btn.className = 'w-full py-2 rounded-xl font-black text-xs uppercase tracking-wider bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 cursor-default';
+    } else {
+      const cost = getUpgradeCost(lvl);
+      const canAfford = saveData.coins >= cost;
+      btn.disabled = false;
+      btn.textContent = `UPGRADE • ₵${cost.toLocaleString()}`;
+      btn.className = canAfford
+        ? 'w-full py-2 rounded-xl font-black text-xs uppercase tracking-wider bg-amber-400 hover:bg-amber-300 active:scale-95 text-slate-950 transition shadow cursor-pointer'
+        : 'w-full py-2 rounded-xl font-black text-xs uppercase tracking-wider bg-slate-800 text-slate-400 border border-slate-700 cursor-not-allowed';
+    }
+  });
+}
+
+window.selectDifficulty = function(diffKey) {
+  sfx.resume();
+  if (!DIFFICULTIES[diffKey]) return;
+  saveData.selectedDifficulty = diffKey;
+  const veh = VEHICLES[saveData.selectedVehicle];
+  gameState.y = getTerrainHeight(gameState.x, gameState.stageId) + veh.wheelRadius + veh.chassisClearance;
+  writeSaveData();
+  renderMenuUI();
+};
+
+window.selectGameMode = function(modeKey) {
+  sfx.resume();
+  if (!GAME_MODES[modeKey]) return;
+  saveData.selectedGameMode = modeKey;
+  writeSaveData();
+  renderMenuUI();
+};
+
+window.selectVehicle = function(vehicleId) {
+  sfx.resume();
+  saveData.selectedVehicle = vehicleId;
+  gameState.vehicleId = vehicleId;
+  activateVehicle3D(vehicleId);
+  const veh = VEHICLES[vehicleId];
+  gameState.y = getTerrainHeight(gameState.x, gameState.stageId) + veh.wheelRadius + veh.chassisClearance;
+  writeSaveData();
+  renderMenuUI();
+};
+
+window.selectStage = function(stageId) {
+  sfx.resume();
+  saveData.selectedStage = stageId;
+  gameState.stageId = stageId;
+  const veh = VEHICLES[gameState.vehicleId];
+  gameState.y = getTerrainHeight(gameState.x, stageId) + veh.wheelRadius + veh.chassisClearance;
+  writeSaveData();
+  renderMenuUI();
+};
+
+window.buyUpgrade = function(part) {
+  sfx.resume();
+  const lvl = saveData.upgrades[part];
+  if (lvl >= 10) return;
+  const cost = getUpgradeCost(lvl);
+  if (saveData.coins < cost) return;
+
+  saveData.coins -= cost;
+  saveData.upgrades[part] = lvl + 1;
+  writeSaveData();
+  sfx.playCoin();
+  renderMenuUI();
+};
+
+function startNewRun() {
+  sfx.resume();
+  document.getElementById('menu-modal').classList.add('hidden');
+  document.getElementById('gameover-modal').classList.add('hidden');
+  document.getElementById('gameplay-top-hud').classList.remove('hidden');
+  document.getElementById('gameplay-bottom-controls').classList.remove('hidden');
+  resetRunState();
+}
+
+function openGarageMenu() {
+  gameState.mode = 'MENU';
+  gameState.inputGas = false;
+  gameState.inputBrake = false;
+  updatePedalVisuals();
+  sfx.updateEngine(0, false);
+  writeSaveData();
+  renderMenuUI();
+  document.getElementById('gameover-modal').classList.add('hidden');
+  document.getElementById('gameplay-top-hud').classList.add('hidden');
+  document.getElementById('gameplay-bottom-controls').classList.add('hidden');
+  document.getElementById('menu-modal').classList.remove('hidden');
+}
+
+function toggleSoundMute() {
+  sfx.resume();
+  sfx.muted = !sfx.muted;
+  const label = sfx.muted ? '🔇 SFX OFF' : '🔊 SFX ON';
+  document.getElementById('mute-icon-label').textContent = label;
+  document.getElementById('btn-menu-sound').textContent = sfx.muted ? '🔇 SFX: OFF' : '🔊 SFX: ON';
+  if (sfx.muted) sfx.updateEngine(0, false);
+}
+
+/* ============================================================================
+   9. INPUT BINDINGS (KEYBOARD, TOUCH & MOUSE PEDALS)
+============================================================================ */
+const pedalGasEl = document.getElementById('pedal-gas');
+const pedalBrakeEl = document.getElementById('pedal-brake');
+
+function updatePedalVisuals() {
+  if (gameState.inputGas) {
+    pedalGasEl.classList.add('pressed');
+  } else {
+    pedalGasEl.classList.remove('pressed');
+  }
+  if (gameState.inputBrake) {
+    pedalBrakeEl.classList.add('pressed');
+  } else {
+    pedalBrakeEl.classList.remove('pressed');
+  }
+}
+
+function bindPedalEvents(el, type) {
+  const press = (e) => {
+    e.preventDefault();
+    sfx.resume();
+    if (gameState.mode !== 'PLAYING') return;
+    if (type === 'gas') gameState.inputGas = true;
+    if (type === 'brake') gameState.inputBrake = true;
+    updatePedalVisuals();
+  };
+  const release = (e) => {
+    e.preventDefault();
+    if (type === 'gas') gameState.inputGas = false;
+    if (type === 'brake') gameState.inputBrake = false;
+    updatePedalVisuals();
+  };
+
+  el.addEventListener('mousedown', press);
+  el.addEventListener('mouseup', release);
+  el.addEventListener('mouseleave', release);
+  el.addEventListener('touchstart', press, { passive: false });
+  el.addEventListener('touchend', release, { passive: false });
+  el.addEventListener('touchcancel', release, { passive: false });
+}
+
+bindPedalEvents(pedalGasEl, 'gas');
+bindPedalEvents(pedalBrakeEl, 'brake');
+
+window.addEventListener('keydown', (e) => {
+  if (gameState.mode !== 'PLAYING') return;
+  if (e.code === 'KeyD' || e.code === 'ArrowRight') {
+    sfx.resume();
+    gameState.inputGas = true;
+    updatePedalVisuals();
+  } else if (e.code === 'KeyA' || e.code === 'ArrowLeft') {
+    sfx.resume();
+    gameState.inputBrake = true;
+    updatePedalVisuals();
+  }
+});
+
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'KeyD' || e.code === 'ArrowRight') {
+    gameState.inputGas = false;
+    updatePedalVisuals();
+  } else if (e.code === 'KeyA' || e.code === 'ArrowLeft') {
+    gameState.inputBrake = false;
+    updatePedalVisuals();
+  }
+});
+
+document.getElementById('btn-start-run').addEventListener('click', startNewRun);
+document.getElementById('btn-pause-garage').addEventListener('click', openGarageMenu);
+document.getElementById('btn-mute').addEventListener('click', toggleSoundMute);
+document.getElementById('btn-menu-sound').addEventListener('click', toggleSoundMute);
+
+document.getElementById('btn-summary-garage').addEventListener('click', openGarageMenu);
+document.getElementById('btn-summary-stage').addEventListener('click', openGarageMenu);
+document.getElementById('btn-summary-retry').addEventListener('click', startNewRun);
+
+document.getElementById('btn-test-coins').addEventListener('click', () => {
+  sfx.resume();
+  saveData.coins += 1000;
+  writeSaveData();
+  sfx.playCoin();
+  renderMenuUI();
+});
+
+document.getElementById('btn-reset-save').addEventListener('click', () => {
+  saveData = {
+    coins: 500,
+    selectedVehicle: 0,
+    selectedStage: 0,
+    bestDistances: { 0: 0, 1: 0, 2: 0 },
+    upgrades: { engine: 1, suspension: 1, tires: 1, fuel4wd: 1 }
+  };
+  activateVehicle3D(0);
+  writeSaveData();
+  renderMenuUI();
+});
+
+/* ============================================================================
+   10. RESIZE HANDLER & 60 FPS MAIN LOOP
+============================================================================ */
+function handleResize() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  bgCanvas.width = w;
+  bgCanvas.height = h;
+  hudCanvas.width = w;
+  hudCanvas.height = h;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+
+window.addEventListener('resize', handleResize);
+
+let lastFrameTime = performance.now();
+let hudRefreshAccumulator = 0;
+
+function animateLoop(now) {
+  requestAnimationFrame(animateLoop);
+
+  const dt = Math.min(0.033, (now - lastFrameTime) / 1000);
+  lastFrameTime = now;
+
+  if (gameState.mode === 'PLAYING') {
+    stepPhysics(dt);
+    hudRefreshAccumulator += dt;
+    if (hudRefreshAccumulator >= 0.06) {
+      updateGameplayHUD();
+      hudRefreshAccumulator = 0;
+    }
+  } else if (gameState.mode === 'MENU') {
+    gameState.wheelRot -= dt * 1.4;
+  }
+
+  drawParallaxBackground();
+  syncThreeScene();
+  drawHudCanvasOverlay();
+}
+
+window.onload = function() {
+  loadSaveData();
+  gameState.vehicleId = saveData.selectedVehicle;
+  gameState.stageId = saveData.selectedStage;
+  activateVehicle3D(gameState.vehicleId);
+  const veh = VEHICLES[gameState.vehicleId];
+  gameState.y = getTerrainHeight(0, gameState.stageId) + veh.wheelRadius + veh.chassisClearance;
+  handleResize();
+  renderMenuUI();
+  requestAnimationFrame(animateLoop);
+};
+</script>
+</body>
+</html>
